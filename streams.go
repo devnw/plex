@@ -6,6 +6,10 @@ import (
 	"io"
 )
 
+// NewReadStreams creates a set of ReadStreams from a slice of io.Reader.
+// The supplied buffer value is used to size the internal buffer for each
+// ReadStream to ensure that the ReadStreams are not blocked if that is the
+// desired behavior. Default buffer is 0 (blocking).
 func NewReadStreams(ctx context.Context, buffer int, readers ...io.Reader) []ReadStream {
 	var streams []ReadStream
 
@@ -16,6 +20,10 @@ func NewReadStreams(ctx context.Context, buffer int, readers ...io.Reader) []Rea
 	return streams
 }
 
+// NewWriteStreams creates a set of WriteStream from a slice of io.Writer.
+// The supplied buffer value is used to size the internal buffer for each
+// ReadStream to ensure that the ReadStreams are not blocked if that is the
+// desired behavior. Default buffer is 0 (blocking).
 func NewWriteStreams(ctx context.Context, buffer int, writers ...io.Writer) []WriteStream {
 	var streams []WriteStream
 
@@ -26,7 +34,10 @@ func NewWriteStreams(ctx context.Context, buffer int, writers ...io.Writer) []Wr
 	return streams
 }
 
-// NewReadStream creates a new ReadStream from an io.Reader.
+// NewReadStream creates a ReadStream from an io.Reader.
+// The supplied buffer value is used to size the internal buffer for the
+// ReadStream to ensure that the ReadStream is not blocked if that is the
+// desired behavior. Default buffer is 0 (blocking).
 func NewReadStream(ctx context.Context, r io.Reader, buffer int) ReadStream {
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -37,7 +48,10 @@ func NewReadStream(ctx context.Context, r io.Reader, buffer int) ReadStream {
 	}
 }
 
-// NewWriteStream creates a new WStream from an io.Writer.
+// NewWriteStream creates a WStream from an io.Writer.
+// The supplied buffer value is used to size the internal buffer for the
+// WriteStream to ensure that the WriteStream is not blocked if that is the
+// desired behavior. Default buffer is 0 (blocking).
 func NewWriteStream(ctx context.Context, w io.Writer, buffer int) WriteStream {
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -55,7 +69,7 @@ func Read(ctx context.Context, r io.Reader, buffer int) <-chan byte {
 
 	go func(out chan<- byte, r io.Reader, buffer int) {
 		defer func() {
-			_ = recover()
+			_ = recover() // TODO: handle in the future?
 		}()
 
 		defer close(out)
@@ -105,7 +119,7 @@ func Write(ctx context.Context, w io.Writer, buffer int) chan<- byte {
 
 	go func(out chan byte, w io.Writer) {
 		defer func() {
-			_ = recover()
+			_ = recover() // TODO: handle in the future?
 		}()
 
 		// It's possible for this to be closed upstream
@@ -142,6 +156,8 @@ func Write(ctx context.Context, w io.Writer, buffer int) chan<- byte {
 	return out
 }
 
+// NewReadWriteStream creates a ReadWriteStream which is a combination of
+// a ReadStream and a WriteStream.
 func NewReadWriteStream(ctx context.Context, buffer int) ReadWriteStream {
 	ctx, cancel := context.WithCancel(ctx)
 	data := make(chan byte, buffer)
@@ -237,10 +253,11 @@ func (r *rStream) Close() (err error) {
 // reading from the stream which allows the stream to be added back to the pool
 // of available read streams.
 func (r *rStream) Data(ctx context.Context) <-chan byte {
-	out := make(chan byte)
+	out := make(chan byte) // TODO: add buffer support to API
 
 	go func(out chan<- byte) {
 		defer func() {
+			_ = recover() // TODO: handle in the future?
 		}()
 		defer close(out)
 
@@ -329,7 +346,7 @@ func (w *wStream) Data(ctx context.Context) chan<- byte {
 
 	go func(in <-chan byte) {
 		defer func() {
-			_ = recover()
+			_ = recover() // TODO: handle in the future?
 		}()
 
 		for {

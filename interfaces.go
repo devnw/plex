@@ -6,19 +6,30 @@ import (
 	"time"
 )
 
+// Initializer defines an interface for allowing plex to instantiate replacement
+// io.Reader, io.Writer, and io.ReadWriter types in the event of a failure with
+// an underlying io.Reader, io.Writer, or io.ReadWriter.
 type Initializer interface {
 	New(ctx context.Context) (interface{}, error)
 }
 
+// Adder defines an interface for adding an io.Reader, io.Writer, or
+// io.ReadWriter after the initial instantiation of the multiplexer.
 type Adder interface {
 	Add(ctx context.Context, objs ...interface{}) error
 }
 
+// unexported creates a compiler enforced method of tying internal interface
+// implementations to the plex library so that users are unable to implement
+// specific types causing misuse of the library.
 type unexported interface {
 	// unexported method force internal only implementations of Multiplexer
 	isPlex()
 }
 
+// Reader defines an interface for requesting an io.ReadCloser from the
+// multiplexer. This will return an available io.ReadCloser from the pool of
+// io.ReadClosers within the multiplexer.
 type Reader interface {
 	unexported
 
@@ -27,6 +38,9 @@ type Reader interface {
 	Reader(context.Context, time.Duration) (io.ReadCloser, error)
 }
 
+// Writer defines an interface for requesting an io.WriteCloser from the
+// multiplexer. This will return an available io.WriteCloser from the pool of
+// io.WriteClosers within the multiplexer.
 type Writer interface {
 	unexported
 
@@ -35,6 +49,9 @@ type Writer interface {
 	Writer(context.Context, time.Duration) (io.WriteCloser, error)
 }
 
+// ReadWriter defines an interface for requesting either an io.ReadCloser, or
+// an io.WriteCloser from the multiplexer. This will return an the first
+// available of the expected type from the internal pool.
 type ReadWriter interface {
 	unexported
 
@@ -57,18 +74,40 @@ type Multiplexer interface {
 	io.Closer
 }
 
+// ReadStream defines an interface which exposes a method for retrieving a
+// direct read-only channel of bytes for reading from the stream. The
+// expected behavior is that the channel returned from Data only reads from a
+// single stream internally. Once the ReadStream is closed the channel should
+// be closed as well.
+//
+// NOTE: Closing the channel is the responsibility of the ReadStream
+// implementation. This differs from the API expected by the WriteStream
+// interface.
 type ReadStream interface {
 	io.Reader
 	io.Closer
 	Data(context.Context) <-chan byte
 }
 
+// WriteStream defines an interface which exposes a method for retrieving a
+// direct write-only channel of bytes for writing to the stream. The
+// expected behavior is that the channel returned from Data only writes to a
+// single stream internally. Once the WriteStream is closed the channel should
+// be closed as well.
+//
+// NOTE: Closing the channel is the responsibility of the caller. This differs
+// from the API expected by the ReadStream interface.
 type WriteStream interface {
 	io.Writer
 	io.Closer
 	Data(context.Context) chan<- byte
 }
 
+// ReadWriteStream defines an interface which exposes a method for retrieving a
+// direct read/write channel of bytes for reading and writing to a stream. The
+// methods used to read and write to the stream are accessed via the In and Out
+// methods. The Out method returns a readable channel of bytes and the In method
+// returns a writeable channel of bytes.
 type ReadWriteStream interface {
 	io.Reader
 	io.Writer
