@@ -9,7 +9,6 @@ import (
 func setOfRandBytes(size int) (data [][]byte, err error) {
 	data = make([][]byte, size)
 	for i := 0; i < len(data); i++ {
-
 		// Mod 1024 to make sure the random bytes
 		// are not too large
 		data[i], err = randBytes(rand.Int() % 1024)

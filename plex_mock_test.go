@@ -63,7 +63,7 @@ func (w *rwc) Write(b []byte) (written int, err error) {
 	return written, err
 }
 
-func (i *rwc) Close() error {
-	i.closed = true
+func (w *rwc) Close() error {
+	w.closed = true
 	return nil
 }

@@ -9,7 +9,6 @@ import (
 )
 
 func Test_Streams_Read(t *testing.T) {
-
 	data, err := setOfRandBytes(100)
 	if err != nil {
 		t.Fatal(err)
@@ -23,7 +22,6 @@ func Test_Streams_Read(t *testing.T) {
 
 		out := Read(ctx, bytes.NewBuffer(test), len(test))
 
-		bdata := []byte(test)
 		var i int
 
 	readloop:
@@ -36,8 +34,8 @@ func Test_Streams_Read(t *testing.T) {
 					break readloop
 				}
 
-				if b != bdata[i] {
-					t.Fatalf("expected %v, got %v", bdata[i], b)
+				if b != test[i] {
+					t.Fatalf("expected %v, got %v", test[i], b)
 				}
 			}
 		}
@@ -57,12 +55,9 @@ func Benchmark_Streams_Read(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	bdata := []byte(data)
-
 	b.ResetTimer()
 
 	for n := 0; n < b.N; n++ {
-
 		out := Read(ctx, bytes.NewBuffer(data), len(data))
 
 		var i int
@@ -77,8 +72,8 @@ func Benchmark_Streams_Read(b *testing.B) {
 					break readloop
 				}
 
-				if bte != bdata[i] {
-					b.Fatalf("expected %v, got %v", bdata[i], b)
+				if bte != data[i] {
+					b.Fatalf("expected %v, got %v", data[i], b)
 				}
 			}
 		}
@@ -86,7 +81,6 @@ func Benchmark_Streams_Read(b *testing.B) {
 }
 
 func Test_Streams_Write(t *testing.T) {
-
 	data, err := setOfRandBytes(100)
 	if err != nil {
 		t.Fatal(err)
@@ -95,10 +89,7 @@ func Test_Streams_Write(t *testing.T) {
 	for _, test := range data {
 		t.Logf("data length: %v bytes", len(test))
 
-		sha := sha1.Sum(test)
-		sha1sum := fmt.Sprintf("%x", sha)
-
-		t.Run(string(sha1sum), func(t *testing.T) {
+		t.Run(fmt.Sprintf("%x", sha1.Sum(test)), func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
@@ -167,7 +158,6 @@ func Benchmark_Streams_Write(b *testing.B) {
 	b.ResetTimer()
 
 	for n := 0; n < b.N; n++ {
-
 		rws := NewReadWriteStream(ctx, 0)
 
 		// Data transfer channels

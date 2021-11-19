@@ -28,7 +28,7 @@ func Test_writer_Write(t *testing.T) {
 			[]byte("valid"),
 			false,
 		},
-		"valid write, cancelled context": {
+		"valid write, canceled context": {
 			cancelledCtx,
 			bytes.NewBuffer(nil),
 			[]byte("valid"),
@@ -38,14 +38,13 @@ func Test_writer_Write(t *testing.T) {
 
 	for name, test := range testdata {
 		t.Run(name, func(t *testing.T) {
-
 			ctx, cancel := context.WithCancel(test.ctx)
 			defer cancel()
 
 			w := &writer{
 				ctx,
 				cancel,
-				func() {},
+				func() error { return nil },
 				test.w,
 				len(test.expected),
 			}
@@ -71,8 +70,7 @@ func Test_writer_Write(t *testing.T) {
 }
 
 func Test_writer_Write_Randoms(t *testing.T) {
-
-	data, err := setOfRandBytes(100)
+	data, err := setOfRandBytes(150)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,10 +78,7 @@ func Test_writer_Write_Randoms(t *testing.T) {
 	for _, test := range data {
 		t.Logf("data length: %v bytes", len(test))
 
-		sha := sha1.Sum(test)
-		sha1sum := fmt.Sprintf("%x", sha)
-
-		t.Run(string(sha1sum), func(t *testing.T) {
+		t.Run(fmt.Sprintf("%x", sha1.Sum(test)), func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			testWriter := bytes.NewBuffer(nil)
@@ -91,7 +86,7 @@ func Test_writer_Write_Randoms(t *testing.T) {
 			w := &writer{
 				ctx,
 				cancel,
-				func() {},
+				func() error { return nil },
 				testWriter,
 				0,
 			}
@@ -113,8 +108,7 @@ func Test_writer_Write_Randoms(t *testing.T) {
 }
 
 func Test_reader_Read_Randoms(t *testing.T) {
-
-	data, err := setOfRandBytes(100)
+	data, err := setOfRandBytes(150)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,10 +116,7 @@ func Test_reader_Read_Randoms(t *testing.T) {
 	for _, test := range data {
 		t.Logf("data length: %v bytes", len(test))
 
-		sha := sha1.Sum(test)
-		sha1sum := fmt.Sprintf("%x", sha)
-
-		t.Run(string(sha1sum), func(t *testing.T) {
+		t.Run(fmt.Sprintf("%x", sha1.Sum(test)), func(t *testing.T) {
 			var err error
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -134,7 +125,7 @@ func Test_reader_Read_Randoms(t *testing.T) {
 			r := &reader{
 				ctx,
 				cancel,
-				func() {},
+				func() error { return nil },
 				testReader,
 				0,
 			}

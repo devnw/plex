@@ -55,7 +55,7 @@ func Read(ctx context.Context, r io.Reader, buffer int) <-chan byte {
 
 	go func(out chan<- byte, r io.Reader, buffer int) {
 		defer func() {
-			recoverErr(recover())
+			_ = recover()
 		}()
 
 		defer close(out)
@@ -93,7 +93,6 @@ func Read(ctx context.Context, r io.Reader, buffer int) <-chan byte {
 				}
 			}
 		}
-
 	}(out, r, buffer)
 
 	return out
@@ -104,9 +103,9 @@ func Read(ctx context.Context, r io.Reader, buffer int) <-chan byte {
 func Write(ctx context.Context, w io.Writer, buffer int) chan<- byte {
 	out := make(chan byte, buffer)
 
-	go func(out chan byte, w io.Writer, buffer int) {
+	go func(out chan byte, w io.Writer) {
 		defer func() {
-			recoverErr(recover())
+			_ = recover()
 		}()
 
 		// It's possible for this to be closed upstream
@@ -138,7 +137,7 @@ func Write(ctx context.Context, w io.Writer, buffer int) chan<- byte {
 				}
 			}
 		}
-	}(out, w, buffer)
+	}(out, w)
 
 	return out
 }
@@ -234,7 +233,7 @@ func (r *rStream) Close() (err error) {
 }
 
 // Data returns a read-only channel of bytes which read from an underlying
-// io.Reader. The reader is responsible for cancelling the context when finished
+// io.Reader. The reader is responsible for canceling the context when finished
 // reading from the stream which allows the stream to be added back to the pool
 // of available read streams.
 func (r *rStream) Data(ctx context.Context) <-chan byte {

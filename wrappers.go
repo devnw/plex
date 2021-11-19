@@ -10,7 +10,7 @@ import (
 type writer struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
-	cleanup func()
+	cleanup func() error
 	w       io.Writer
 	buffer  int
 }
@@ -25,9 +25,11 @@ func (w *writer) Write(b []byte) (int, error) {
 	}
 }
 
-func (w *writer) Close() error {
+func (w *writer) Close() (err error) {
 	if w.cleanup != nil {
-		defer w.cleanup()
+		defer func() {
+			err = w.cleanup()
+		}()
 	}
 
 	w.cancel()
@@ -38,7 +40,7 @@ func (w *writer) Close() error {
 type reader struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
-	cleanup func()
+	cleanup func() error
 	r       io.Reader
 	buffer  int
 }
@@ -54,9 +56,11 @@ func (r *reader) Read(b []byte) (int, error) {
 	}
 }
 
-func (r *reader) Close() error {
+func (r *reader) Close() (err error) {
 	if r.cleanup != nil {
-		defer r.cleanup()
+		defer func() {
+			err = r.cleanup()
+		}()
 	}
 
 	r.cancel()

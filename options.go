@@ -78,7 +78,6 @@ func WithReadWriters(rws ...io.ReadWriter) Option {
 // state by executing the given function and passing it the multiplexer queue
 // method where it will be able to add new readers and writers.
 func WithInitializer(init Initializer) Option {
-
 	// TODO:
 	return func(m *multiplexer) error {
 		m.initializer = init

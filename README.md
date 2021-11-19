@@ -1,6 +1,6 @@
 # Plex is a network connection multiplexer for parallel connections
 
-[![Build & Test Action Status](https://github.com/atomizer/plex/actions/workflows/build.yml/badge.svg)](https://github.com/atomizer/plex/actions)
+[![Build & Test](https://github.com/devnw/plex/actions/workflows/build.yml/badge.svg)](https://github.com/devnw/plex/actions/workflows/build.yml)
 [![Go Report Card](https://goreportcard.com/badge/go.atomizer.io/plex)](https://goreportcard.com/report/go.atomizer.io/plex)
 [![codecov](https://codecov.io/gh/atomizer/plex/branch/main/graph/badge.svg)](https://codecov.io/gh/atomizer/plex)
 [![Go Reference](https://pkg.go.dev/badge/go.atomizer.io/plex.svg)](https://pkg.go.dev/go.atomizer.io/plex)

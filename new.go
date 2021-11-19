@@ -5,7 +5,7 @@ import (
 )
 
 // New creates a new Multiplexer using the provided io.ReadWriters
-func New(ctx context.Context, buffer int, opts ...Option) (Multiplexer, error) {
+func New(ctx context.Context, opts ...Option) (Multiplexer, error) {
 	ctx, cancel := context.WithCancel(ctx)
 
 	m := &multiplexer{
@@ -33,14 +33,23 @@ func New(ctx context.Context, buffer int, opts ...Option) (Multiplexer, error) {
 	)
 
 	// Queue up the pool of readers, writers and readwriters
-	m.queue(
-		m.ctx,
-		append(
-			m.initReadPool,
-			append(
-				m.initWritePool,
-				m.initReadWritePool...,
-			)...)...)
+	err := m.queueReaders(ctx, m.initReadPool...)
+	if err != nil {
+		return nil, err
+	}
+
+	err = m.queueWriters(ctx, m.initWritePool...)
+	if err != nil {
+		return nil, err
+	}
+
+	err = m.queueReadWriters(ctx, m.initReadWritePool...)
+	if err != nil {
+		return nil, err
+	}
+
+	// initialize cleanup routine
+	go m.cleanup()
 
 	return m, nil
 }

@@ -32,18 +32,8 @@ func Test_Reader(t *testing.T) {
 
 			m, err := New(
 				ctx,
-				1,
 				WithReaders(bytes.NewBuffer(test.expected)),
 			)
-			if err != nil {
-				if !test.err {
-					t.Errorf("unexpected error: %v", err)
-				}
-
-				return
-			}
-
-			wc, err := m.Writer(ctx, time.Second)
 			if err != nil {
 				if !test.err {
 					t.Errorf("unexpected error: %v", err)
@@ -60,8 +50,6 @@ func Test_Reader(t *testing.T) {
 
 				return
 			}
-
-			wc.Write(test.expected)
 
 			lenexp := len(test.expected)
 			t.Logf("lenexp: %v", lenexp)

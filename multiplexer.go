@@ -22,9 +22,9 @@ type multiplexer struct {
 	// to calculate the size of the internal buffers as well as allow
 	// for all the options to be configured for the multiplexer prior
 	// to initialization.
-	initReadPool      []interface{}
-	initWritePool     []interface{}
-	initReadWritePool []interface{}
+	initReadPool      []io.Reader
+	initWritePool     []io.Writer
+	initReadWritePool []io.ReadWriter
 
 	readers chan ReadStream
 	writers chan WriteStream
@@ -80,6 +80,7 @@ func (m *multiplexer) Add(
 
 // queue correctly handles the addition of supported streams or readers/writers
 // to the multiplexer.
+// nolint:gocyclo
 func (m *multiplexer) queue(
 	ctx context.Context,
 	in ...interface{},
@@ -121,32 +122,14 @@ func (m *multiplexer) queue(
 					return err
 				}
 			case io.ReadWriter:
-				err := m.queueReaders(ctx, value)
-				if err != nil {
-					return err
-				}
-				err = m.queueWriters(ctx, value)
+				err := m.queueReadWriters(ctx, value)
 				if err != nil {
 					return err
 				}
 			case []io.ReadWriter:
-				for _, rw := range value {
-					select {
-					case <-m.ctx.Done():
-						return m.ctx.Err()
-					case <-ctx.Done():
-						return ctx.Err()
-					default:
-						err := m.queueReaders(ctx, rw)
-						if err != nil {
-							return err
-						}
-
-						err = m.queueWriters(ctx, rw)
-						if err != nil {
-							return err
-						}
-					}
+				err := m.queueReadWriters(ctx, value...)
+				if err != nil {
+					return err
 				}
 			case io.Reader:
 				err := m.queueReaders(ctx, value)
@@ -253,6 +236,32 @@ func (m *multiplexer) queueWriters(
 	return nil
 }
 
+func (m *multiplexer) queueReadWriters(
+	ctx context.Context,
+	rws ...io.ReadWriter,
+) error {
+	for _, rw := range rws {
+		select {
+		case <-m.ctx.Done():
+			return m.ctx.Err()
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			err := m.queueReaders(ctx, rw)
+			if err != nil {
+				return err
+			}
+
+			err = m.queueWriters(ctx, rw)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
 // Reader returns one of the multiplexed readers for reading. Reading should
 // occur in completion (for the use case) by the caller before closing the
 // returned reader. A closed reader is returned to the multiplexer's pool of
@@ -260,6 +269,7 @@ func (m *multiplexer) queueWriters(
 // within the multiplexer's pool of available readers, the multiplexer will
 // eliminate the reader from the pool and attempt to retrieve a new one if
 // possible.
+// nolint:dupl
 func (m *multiplexer) Reader(
 	ctx context.Context,
 	timeout time.Duration,
@@ -279,17 +289,17 @@ func (m *multiplexer) Reader(
 			return nil, ErrClosed
 		}
 
-		ctx, cancel := context.WithCancel(ctx)
+		rctx, rcancel := context.WithCancel(ctx)
 
 		return &reader{
-			ctx:    ctx,
-			cancel: cancel,
+			ctx:    rctx,
+			cancel: rcancel,
 			r:      r,
 			buffer: m.readBufferSize,
-			cleanup: func() {
+			cleanup: func() error {
 				// This is already a read stream so
 				// no need to update the buffer
-				m.queue(ctx, -1, r)
+				return m.queue(ctx, -1, r)
 			},
 		}, nil
 	}
@@ -302,6 +312,7 @@ func (m *multiplexer) Reader(
 // within the multiplexer's pool of available writers, the multiplexer will
 // eliminate the writer from the pool and attempt to retrieve a new one if
 // possible.
+// nolint:dupl
 func (m *multiplexer) Writer(
 	ctx context.Context,
 	timeout time.Duration,
@@ -321,17 +332,17 @@ func (m *multiplexer) Writer(
 			return nil, ErrClosed
 		}
 
-		ctx, cancel := context.WithCancel(ctx)
+		wctx, wcancel := context.WithCancel(ctx)
 
 		return &writer{
-			ctx:    ctx,
-			cancel: cancel,
+			ctx:    wctx,
+			cancel: wcancel,
 			w:      w,
 			buffer: m.writeBufferSize,
-			cleanup: func() {
+			cleanup: func() error {
 				// This is already a read stream so
 				// no need to update the buffer
-				m.queue(ctx, -1, w)
+				return m.queue(ctx, -1, w)
 			},
 		}, nil
 	}
