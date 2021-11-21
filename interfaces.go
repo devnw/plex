@@ -6,13 +6,6 @@ import (
 	"time"
 )
 
-// Initializer defines an interface for allowing plex to instantiate replacement
-// io.Reader, io.Writer, and io.ReadWriter types in the event of a failure with
-// an underlying io.Reader, io.Writer, or io.ReadWriter.
-type Initializer interface {
-	New(ctx context.Context) (interface{}, error)
-}
-
 // Adder defines an interface for adding an io.Reader, io.Writer, or
 // io.ReadWriter after the initial instantiation of the multiplexer.
 type Adder interface {
@@ -35,7 +28,10 @@ type Reader interface {
 
 	Adder
 
-	Reader(context.Context, time.Duration) (io.ReadCloser, error)
+	// TODO: Should this be updated to return a <-chan io.ReadCloser instead?
+	// this would allow for external libraries to handle scaling the multiplexer
+	// using select contention instead of requiring the plex library to handle it.
+	Reader(context.Context, *time.Duration) (io.ReadCloser, error)
 }
 
 // Writer defines an interface for requesting an io.WriteCloser from the
@@ -46,7 +42,10 @@ type Writer interface {
 
 	Adder
 
-	Writer(context.Context, time.Duration) (io.WriteCloser, error)
+	// TODO: Should this be updated to return a <-chan io.WriteCloser instead?
+	// this would allow for external libraries to handle scaling the multiplexer
+	// using select contention instead of requiring the plex library to handle it.
+	Writer(context.Context, *time.Duration) (io.WriteCloser, error)
 }
 
 // ReadWriter defines an interface for requesting either an io.ReadCloser, or
@@ -103,12 +102,12 @@ type WriteStream interface {
 	Data(context.Context) chan<- byte
 }
 
-// ReadWriteStream defines an interface which exposes a method for retrieving a
+// Stream defines an interface which exposes a method for retrieving a
 // direct read/write channel of bytes for reading and writing to a stream. The
 // methods used to read and write to the stream are accessed via the In and Out
 // methods. The Out method returns a readable channel of bytes and the In method
 // returns a writeable channel of bytes.
-type ReadWriteStream interface {
+type Stream interface {
 	io.Reader
 	io.Writer
 	io.Closer

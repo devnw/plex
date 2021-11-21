@@ -21,6 +21,14 @@ func New(ctx context.Context, opts ...Option) (Multiplexer, error) {
 		}
 	}
 
+	// Ensure that we have at least one element to
+	// work with
+	if len(m.initReadPool)+
+		len(m.initWritePool)+
+		len(m.initReadWritePool) == 0 {
+		return nil, ErrEmptyPool
+	}
+
 	// Initialize readers channel
 	m.readers = make(
 		chan ReadStream,
@@ -47,6 +55,11 @@ func New(ctx context.Context, opts ...Option) (Multiplexer, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Cleanup the initialization pools from the options
+	m.initReadPool = nil
+	m.initWritePool = nil
+	m.initReadWritePool = nil
 
 	// initialize cleanup routine
 	go m.cleanup()

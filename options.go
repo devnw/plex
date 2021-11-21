@@ -1,12 +1,12 @@
 package plex
 
-import "io"
+import (
+	"io"
+)
 
 // Option is the function literate that is used to configure the multiplexer
 // during initialization.
 type Option func(*multiplexer) error
-
-// TODO: define what buffer does for these options
 
 // WithReadBuffer adds a buffer to the multiplexer's io.Readers.
 // NOTE: This also applies to the io.Reader implementation of an io.ReadWriter.
@@ -70,17 +70,6 @@ func WithReadWriters(rws ...io.ReadWriter) Option {
 			m.initReadWritePool = append(m.initReadWritePool, rw)
 		}
 
-		return nil
-	}
-}
-
-// WithInitializer gives the multiplexer a chance to re-initialize it's internal
-// state by executing the given function and passing it the multiplexer queue
-// method where it will be able to add new readers and writers.
-func WithInitializer(init Initializer) Option {
-	// TODO:
-	return func(m *multiplexer) error {
-		m.initializer = init
 		return nil
 	}
 }

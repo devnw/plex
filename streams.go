@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 )
 
 // NewReadStreams creates a set of ReadStreams from a slice of io.Reader.
@@ -55,11 +56,15 @@ func NewReadStream(ctx context.Context, r io.Reader, buffer int) ReadStream {
 func NewWriteStream(ctx context.Context, w io.Writer, buffer int) WriteStream {
 	ctx, cancel := context.WithCancel(ctx)
 
-	return &wStream{
+	ws := &wStream{
 		ctx:    ctx,
 		cancel: cancel,
 		w:      Write(ctx, w, buffer),
 	}
+
+	go cleanup(ctx, ws.w)
+
+	return ws
 }
 
 // Read reads from an io.Reader and pushes to a byte channel
@@ -70,6 +75,14 @@ func Read(ctx context.Context, r io.Reader, buffer int) <-chan byte {
 	go func(out chan<- byte, r io.Reader, buffer int) {
 		defer func() {
 			_ = recover() // TODO: handle in the future?
+		}()
+
+		// If the reader is also a closer then close it here
+		defer func() {
+			closer, ok := r.(io.Closer)
+			if ok {
+				closer.Close()
+			}
 		}()
 
 		defer close(out)
@@ -117,16 +130,20 @@ func Read(ctx context.Context, r io.Reader, buffer int) <-chan byte {
 func Write(ctx context.Context, w io.Writer, buffer int) chan<- byte {
 	out := make(chan byte, buffer)
 
-	go func(out chan byte, w io.Writer) {
+	go cleanup(ctx, out)
+
+	go func(out <-chan byte, w io.Writer) {
 		defer func() {
 			_ = recover() // TODO: handle in the future?
 		}()
 
-		// It's possible for this to be closed upstream
-		// in the event of a panic above the caller which
-		// writes to the channel will need to have a recover
-		// to handle a pre-mature close
-		defer close(out)
+		// If the writer is also a closer then close it here
+		defer func() {
+			closer, ok := w.(io.Closer)
+			if ok {
+				closer.Close()
+			}
+		}()
 
 		for {
 			select {
@@ -137,16 +154,10 @@ func Write(ctx context.Context, w io.Writer, buffer int) chan<- byte {
 					return
 				}
 
-				n, err := w.Write([]byte{b})
+				_, err := w.Write([]byte{b})
 				if err != nil {
 					// TODO: Handle error
 					fmt.Println(err)
-					return
-				}
-
-				if n != 1 {
-					// TODO: Handle error
-					fmt.Printf("n != 1: %d\n", n)
 					return
 				}
 			}
@@ -156,9 +167,26 @@ func Write(ctx context.Context, w io.Writer, buffer int) chan<- byte {
 	return out
 }
 
-// NewReadWriteStream creates a ReadWriteStream which is a combination of
-// a ReadStream and a WriteStream.
-func NewReadWriteStream(ctx context.Context, buffer int) ReadWriteStream {
+// StreamFromReadWriter creates a ReadWriteStream which is a combination of
+// a ReadStream and a WriteStream wrapped around a single io.ReadWriter.
+func StreamFromReadWriter(
+	ctx context.Context,
+	rw io.ReadWriter,
+	buffer int,
+) Stream {
+	ctx, cancel := context.WithCancel(ctx)
+
+	return &rwStream{
+		ctx:    ctx,
+		cancel: cancel,
+		r:      NewReadStream(ctx, rw, buffer),
+		w:      NewWriteStream(ctx, rw, buffer),
+	}
+}
+
+// NewStream creates a Stream which creates a stream of data that can be read
+// from or written to.
+func NewStream(ctx context.Context, buffer int) Stream {
 	ctx, cancel := context.WithCancel(ctx)
 	data := make(chan byte, buffer)
 
@@ -168,21 +196,19 @@ func NewReadWriteStream(ctx context.Context, buffer int) ReadWriteStream {
 	return &rwStream{
 		ctx:    ctx,
 		cancel: cancel,
-		data:   data,
 		r:      &rStream{ctx: readCtx, cancel: readCancel, r: data},
 		w:      &wStream{ctx: writeCtx, cancel: writeCancel, w: data},
 	}
 }
 
 // Interface enforcer
-var _ ReadWriteStream = (*rwStream)(nil)
+var _ Stream = (*rwStream)(nil)
 
 type rwStream struct {
 	ctx    context.Context
 	cancel context.CancelFunc
-	data   chan byte
-	r      *rStream
-	w      *wStream
+	r      ReadStream
+	w      WriteStream
 }
 
 func (rws *rwStream) Out(ctx context.Context) <-chan byte {
@@ -203,7 +229,7 @@ func (rws *rwStream) Write(p []byte) (n int, err error) {
 
 func (rws *rwStream) Close() (err error) {
 	defer func() {
-		err = recoverErr(recover())
+		_ = recover()
 	}()
 
 	defer rws.cancel()
@@ -238,10 +264,7 @@ type rStream struct {
 
 func (r *rStream) Close() (err error) {
 	defer func() {
-		err = recoverErr(recover())
-		if err != nil {
-			fmt.Println(err)
-		}
+		_ = recover()
 	}()
 
 	r.cancel()
@@ -267,18 +290,7 @@ func (r *rStream) Data(ctx context.Context) <-chan byte {
 				return
 			case <-ctx.Done():
 				return
-			case b, ok := <-r.r: // Forward data
-				if !ok {
-					return
-				}
-
-				select {
-				case <-r.ctx.Done():
-					return
-				case <-ctx.Done():
-					return
-				case out <- b:
-				}
+			case out <- <-r.r:
 			}
 		}
 	}(out)
@@ -289,13 +301,16 @@ func (r *rStream) Data(ctx context.Context) <-chan byte {
 // Read is the RStream io.Reader implementation.
 func (r *rStream) Read(p []byte) (n int, err error) {
 	defer func() {
-		err = recoverErr(recover())
+		r := recoverErr(recover())
+		if r != nil {
+			err = r
+		}
 	}()
 
 	var ok bool
 	var i int
 
-	for i = range p {
+	for i = 0; i < len(p); i++ {
 		select {
 		case <-r.ctx.Done():
 			return i, r.ctx.Err()
@@ -307,8 +322,7 @@ func (r *rStream) Read(p []byte) (n int, err error) {
 		}
 	}
 
-	// return i+1 for a proper 0 index byte count
-	return i + 1, nil
+	return i, nil
 }
 
 // Interface enforcer
@@ -329,7 +343,7 @@ type wStream struct {
 
 func (w *wStream) Close() (err error) {
 	defer func() {
-		err = recoverErr(recover())
+		_ = recover()
 	}()
 
 	w.cancel()
@@ -356,19 +370,7 @@ func (w *wStream) Data(ctx context.Context) chan<- byte {
 				return
 			case <-ctx.Done():
 				return
-			case b, ok := <-in:
-				if !ok {
-					return
-				}
-
-				select {
-				case <-w.ctx.Done():
-					defer close(w.w)
-					return
-				case <-ctx.Done():
-					return
-				case w.w <- b:
-				}
+			case w.w <- <-in:
 			}
 		}
 	}(in)
@@ -379,18 +381,41 @@ func (w *wStream) Data(ctx context.Context) chan<- byte {
 // Write is the WStream io.Writer implementation.
 func (w *wStream) Write(p []byte) (n int, err error) {
 	defer func() {
-		err = recoverErr(recover())
+		r := recoverErr(recover())
+		if r != nil {
+			err = r
+		}
 	}()
 
 	for _, b := range p {
 		select {
 		case <-w.ctx.Done():
-			defer close(w.w)
-			return n, w.ctx.Err()
+			return n, nil
 		case w.w <- b:
 			n++
 		}
 	}
 
 	return n, nil
+}
+
+func cleanup(ctx context.Context, writeChannel chan<- byte) {
+	defer func() {
+		_ = recover()
+	}()
+
+	// Close the internal channel on close
+	defer close(writeChannel)
+
+	<-ctx.Done()
+
+	// NOTE: This is still a race here...
+	timer := time.NewTimer(time.Millisecond)
+	for len(writeChannel) > 0 {
+		select {
+		case <-timer.C:
+			return
+		default:
+		}
+	}
 }

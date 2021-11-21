@@ -28,10 +28,6 @@ type multiplexer struct {
 
 	readers chan ReadStream
 	writers chan WriteStream
-
-	// Used to add new readers and writers to the multiplexer in the event
-	// of a failure on a reader/writer.
-	initializer Initializer
 }
 
 // unexported method force internal only implementations of Multiplexer
@@ -40,7 +36,10 @@ func (m *multiplexer) isPlex() {}
 // Close closes the multiplexer and all of its streams.
 func (m *multiplexer) Close() (err error) {
 	defer func() {
-		err = recoverErr(recover())
+		r := recoverErr(recover())
+		if r != nil {
+			err = r
+		}
 	}()
 
 	m.cancel()
@@ -86,71 +85,51 @@ func (m *multiplexer) queue(
 	in ...interface{},
 ) (err error) {
 	defer func() {
-		err = recoverErr(recover())
+		r := recoverErr(recover())
+		if r != nil {
+			err = r
+		}
 	}()
 
 	for _, incoming := range in {
+		// TODO: update after nested context is implemented
 		select {
 		case <-m.ctx.Done():
 			return m.ctx.Err()
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
+			var err error
+
 			switch value := incoming.(type) {
 			case nil:
 				return ErrNil
 			case []interface{}:
 				return m.queue(ctx, value...)
 			case ReadStream:
-				err := m.queueReadStreams(ctx, value)
-				if err != nil {
-					return err
-				}
+				err = m.queueReadStreams(ctx, value)
 			case WriteStream:
-				err := m.queueWriteStreams(ctx, value)
-				if err != nil {
-					return err
-				}
+				err = m.queueWriteStreams(ctx, value)
 			case []ReadStream:
-				err := m.queueReadStreams(ctx, value...)
-				if err != nil {
-					return err
-				}
+				err = m.queueReadStreams(ctx, value...)
 			case []WriteStream:
-				err := m.queueWriteStreams(ctx, value...)
-				if err != nil {
-					return err
-				}
+				err = m.queueWriteStreams(ctx, value...)
 			case io.ReadWriter:
-				err := m.queueReadWriters(ctx, value)
-				if err != nil {
-					return err
-				}
+				err = m.queueReadWriters(ctx, value)
 			case []io.ReadWriter:
-				err := m.queueReadWriters(ctx, value...)
-				if err != nil {
-					return err
-				}
+				err = m.queueReadWriters(ctx, value...)
 			case io.Reader:
-				err := m.queueReaders(ctx, value)
-				if err != nil {
-					return err
-				}
+				err = m.queueReaders(ctx, value)
 			case []io.Reader:
-				err := m.queueReaders(ctx, value...)
-				if err != nil {
-					return err
-				}
+				err = m.queueReaders(ctx, value...)
 			case io.Writer:
-				err := m.queueWriters(ctx, value)
-				if err != nil {
-					return err
-				}
+				err = m.queueWriters(ctx, value)
 			case []io.Writer:
-				err := m.queueWriters(ctx, value...)
-				if err != nil {
-					return err
-				}
+				err = m.queueWriters(ctx, value...)
+			}
+
+			if err != nil {
+				return err
 			}
 		}
 	}
@@ -163,6 +142,7 @@ func (m *multiplexer) queueReadStreams(
 	streams ...ReadStream,
 ) error {
 	for _, stream := range streams {
+		// TODO: update after nested context is implemented
 		select {
 		case <-m.ctx.Done():
 			return m.ctx.Err()
@@ -180,6 +160,7 @@ func (m *multiplexer) queueWriteStreams(
 	streams ...WriteStream,
 ) error {
 	for _, stream := range streams {
+		// TODO: update after nested context is implemented
 		select {
 		case <-m.ctx.Done():
 			return m.ctx.Err()
@@ -192,11 +173,14 @@ func (m *multiplexer) queueWriteStreams(
 	return nil
 }
 
+// TODO: Should there be an attempt to track
+// the count of available readers and writers?
+
 func (m *multiplexer) queueReaders(
 	ctx context.Context,
 	readers ...io.Reader,
 ) error {
-	// TODO: update to NewWriteStreams after nested context is implemented
+	// TODO: update after nested context is implemented
 	for _, r := range readers {
 		select {
 		case <-m.ctx.Done():
@@ -218,7 +202,7 @@ func (m *multiplexer) queueWriters(
 	ctx context.Context,
 	writers ...io.Writer,
 ) error {
-	// TODO: update to NewWriteStreams after nested context is implemented
+	// TODO: update after nested context is implemented
 	for _, w := range writers {
 		select {
 		case <-m.ctx.Done():
@@ -240,6 +224,7 @@ func (m *multiplexer) queueReadWriters(
 	ctx context.Context,
 	rws ...io.ReadWriter,
 ) error {
+	// TODO: update after nested context is implemented
 	for _, rw := range rws {
 		select {
 		case <-m.ctx.Done():
@@ -272,17 +257,22 @@ func (m *multiplexer) queueReadWriters(
 // nolint:dupl
 func (m *multiplexer) Reader(
 	ctx context.Context,
-	timeout time.Duration,
+	timeout *time.Duration,
 ) (io.ReadCloser, error) {
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
+	var tchan <-chan time.Time
+
+	if timeout != nil {
+		timer := time.NewTimer(*timeout)
+		defer timer.Stop()
+		tchan = timer.C
+	}
 
 	select {
 	case <-m.ctx.Done():
 		return nil, m.ctx.Err()
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-timer.C:
+	case <-tchan:
 		return nil, ErrTimeout
 	case r, ok := <-m.readers:
 		if !ok {
@@ -315,17 +305,22 @@ func (m *multiplexer) Reader(
 // nolint:dupl
 func (m *multiplexer) Writer(
 	ctx context.Context,
-	timeout time.Duration,
+	timeout *time.Duration,
 ) (io.WriteCloser, error) {
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
+	var tchan <-chan time.Time
+
+	if timeout != nil {
+		timer := time.NewTimer(*timeout)
+		defer timer.Stop()
+		tchan = timer.C
+	}
 
 	select {
 	case <-m.ctx.Done():
 		return nil, m.ctx.Err()
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-timer.C:
+	case <-tchan:
 		return nil, ErrTimeout
 	case w, ok := <-m.writers:
 		if !ok {

@@ -3,78 +3,204 @@ package plex
 import (
 	"bytes"
 	"context"
+	"crypto/sha1"
+	"fmt"
 	"io"
-	"reflect"
 	"testing"
-	"time"
+
+	"github.com/google/go-cmp/cmp"
 )
 
-func Test_Reader(t *testing.T) {
-	testdata := map[string]struct {
-		rwc      *rwc
-		expected []byte
-		err      bool
-	}{
-		"valid single": {
-			&rwc{
-				buffer: make([]byte, 5),
-				wrote:  make(chan bool),
-			},
-			[]byte("test1"),
-			false,
-		},
+func Test_Multiplexer_Reader(t *testing.T) {
+	data, err := setOfRandBytes(100)
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	for name, test := range testdata {
-		t.Run(name, func(t *testing.T) {
+	for sum, test := range data {
+		t.Logf("data length: %v bytes", len(test))
+
+		t.Run(sum, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
 			m, err := New(
 				ctx,
-				WithReaders(bytes.NewBuffer(test.expected)),
+				WithReaders(bytes.NewBuffer(test)),
 			)
 			if err != nil {
-				if !test.err {
-					t.Errorf("unexpected error: %v", err)
-				}
-
-				return
+				t.Errorf("unexpected error: %v", err)
 			}
 
-			rc, err := m.Reader(ctx, time.Second)
+			rc, err := m.Reader(ctx, nil)
 			if err != nil {
-				if !test.err {
-					t.Errorf("unexpected error: %v", err)
-				}
-
-				return
+				t.Errorf("unexpected error: %v", err)
 			}
 
-			lenexp := len(test.expected)
-			t.Logf("lenexp: %v", lenexp)
-			buff := make([]byte, lenexp)
-			n, err := rc.Read(buff)
-			if err != nil && err != io.EOF {
-				if !test.err {
-					t.Fatalf("unexpected error: %v", err)
-				}
+			var output []byte
+			var n int
+			buff := make([]byte, 3)
 
-				return
+			for err == nil {
+				// Read from rc
+				n, err = rc.Read(buff)
+
+				// Append the read bytes to the output
+				output = append(output, buff[:n]...)
+			}
+
+			if err != nil && err != io.EOF {
+				t.Fatalf("unexpected error: %v", err)
 			}
 
 			rc.Close()
 
-			if n != len(test.expected) {
-				t.Fatalf("unexpected read length: %d", n)
+			if len(output) != len(test) {
+				t.Fatalf("unexpected read length: %d", len(output))
 			}
 
-			if !reflect.DeepEqual(buff, test.expected) {
-				t.Fatalf("unexpected read data: %v", buff)
+			diff := cmp.Diff(output, test)
+			if diff != "" {
+				t.Fatalf(
+					"byte mismatch\n %s", diff,
+				)
 			}
 		})
 	}
 }
+
+func Test_Multiplexer_Multi_Reader(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dataset := map[string]bool{}
+	data, err := setOfRandBytes(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := New(
+		ctx,
+		WithReadWriters(data.SliceOfReadWriter()...),
+	)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	for i := 0; i < len(data); i++ {
+		rc, err := m.Reader(ctx, nil)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		var output []byte
+		var n int
+		buff := make([]byte, 3)
+
+		for err == nil {
+			// Read from rc
+			n, err = rc.Read(buff)
+
+			// Append the read bytes to the output
+			output = append(output, buff[:n]...)
+		}
+
+		if err != nil && err != io.EOF {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		rc.Close()
+
+		sum := fmt.Sprintf("%x", sha1.Sum(output))
+		_, exists := data[sum]
+		if !exists {
+			t.Fatalf("unexpected sum: %v", sum)
+		}
+
+		seen := dataset[sum]
+		if seen {
+			t.Fatalf("duplicate sum: %v", sum)
+		}
+
+		// Mark the sum as seen
+		dataset[sum] = true
+		t.Logf("found sum: %v", sum)
+	}
+
+	for k := range data {
+		seen, exists := dataset[k]
+		if !exists || !seen {
+			t.Fatalf("missing sum: %v", k)
+		}
+	}
+}
+
+// func Test_Multplexer_Writer(t *testing.T) {
+// 	data, err := setOfRandBytes(100)
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+
+// 	for sum, test := range data {
+// 		t.Run(sum, func(t *testing.T) {
+// 			t.Logf("data length: %v bytes", len(test))
+
+// 			ctx, cancel := context.WithCancel(context.Background())
+// 			defer cancel()
+
+// 			stream := NewStream(ctx, 0)
+
+// 			m, err := New(
+// 				ctx,
+// 				WithReadWriters(stream),
+// 			)
+// 			if err != nil {
+// 				t.Errorf("unexpected error: %v", err)
+// 			}
+
+// 			go func() {
+
+// 				wc, err := m.Writer(ctx, nil)
+// 				if err != nil {
+// 					t.Errorf("unexpected error: %v", err)
+// 				}
+// 				defer wc.Close()
+
+// 				n, err := wc.Write(test)
+// 				if err != nil {
+// 					t.Errorf("unexpected error: %v", err)
+// 				}
+
+// 				if n != len(test) {
+// 					t.Errorf("unexpected write length: %d", n)
+// 				}
+// 			}()
+
+// 			data := stream.Out(ctx)
+
+// 		readloop:
+// 			for i := 0; ; i++ {
+// 				select {
+// 				case <-ctx.Done():
+// 					t.Fatalf("unexpected error: %v", ctx.Err())
+// 				case bte, ok := <-data:
+// 					if !ok {
+// 						break readloop
+// 					}
+
+// 					if test[i] != bte {
+// 						t.Fatalf(
+// 							"byte mismatch at index %v; expected %v; got %v",
+// 							i,
+// 							test[i],
+// 							bte,
+// 						)
+// 					}
+// 				}
+// 			}
+// 		})
+// 	}
+// }
 
 // func Test_Out(t *testing.T) {
 // 	testdata := map[string]struct {
