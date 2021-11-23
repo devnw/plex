@@ -3,9 +3,11 @@ package plex
 import (
 	"bytes"
 	"crypto/sha1"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
+	"testing"
 )
 
 // SumByteSlice is a map with a key which is the sha1sum of the byte slice
@@ -47,4 +49,45 @@ func randBytes(size int) ([]byte, error) {
 	}
 
 	return buff[:n], nil
+}
+
+func Test_recoverErr(t *testing.T) {
+	testdata := map[string]struct {
+		value    interface{}
+		expected error
+	}{
+		"nil": {
+			value:    nil,
+			expected: nil,
+		},
+		"string": {
+			value:    "test error",
+			expected: errors.New("test error"),
+		},
+		"error": {
+			value:    errors.New("test error"),
+			expected: errors.New("test error"),
+		},
+		"recover type proxy": {
+			value:    365,
+			expected: errors.New("panic: 365"),
+		},
+	}
+
+	for name, test := range testdata {
+		t.Run(name, func(t *testing.T) {
+			err := recoverErr(test.value)
+			if err == nil && test.expected == nil {
+				return
+			}
+
+			if err.Error() != test.expected.Error() {
+				t.Errorf(
+					"expected %s, got %s",
+					test.expected.Error(),
+					err.Error(),
+				)
+			}
+		})
+	}
 }
