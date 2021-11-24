@@ -6,6 +6,7 @@ import (
 	"crypto/sha1"
 	"fmt"
 	"testing"
+	"time"
 )
 
 func Test_Streams_Read(t *testing.T) {
@@ -253,6 +254,33 @@ func Test_Write(t *testing.T) {
 			}
 		})
 	}
+}
+
+type badWriter struct{}
+
+func (b *badWriter) Write(p []byte) (n int, err error) {
+	return 0, fmt.Errorf("bad writer error")
+}
+
+func Test_Write_Writer_Error(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	wchan := Write(ctx, &badWriter{}, 0)
+
+	timer := time.NewTimer(time.Millisecond * 50)
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-ctx.Done():
+			return
+		case wchan <- 0:
+		case <-timer.C:
+			return
+		}
+	}
+
+	t.Fatal("expected timer to return test")
 }
 
 func Test_Read(t *testing.T) {

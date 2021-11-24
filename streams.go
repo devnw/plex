@@ -130,13 +130,7 @@ func Read(ctx context.Context, r io.Reader, buffer int) <-chan byte {
 func Write(ctx context.Context, w io.Writer, buffer int) chan<- byte {
 	out := make(chan byte, buffer)
 
-	go cleanup(ctx, out)
-
-	go func(out <-chan byte, w io.Writer) {
-		defer func() {
-			_ = recover() // TODO: handle in the future?
-		}()
-
+	go func(out chan byte, w io.Writer) {
 		// If the writer is also a closer then close it here
 		defer func() {
 			closer, ok := w.(io.Closer)
@@ -154,10 +148,8 @@ func Write(ctx context.Context, w io.Writer, buffer int) chan<- byte {
 					return
 				}
 
-				_, err := w.Write([]byte{b})
-				if err != nil {
-					// TODO: Handle error
-					fmt.Println(err)
+				n, err := w.Write([]byte{b})
+				if err != nil || n == 0 {
 					return
 				}
 			}
