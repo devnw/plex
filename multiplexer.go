@@ -35,12 +35,7 @@ func (m *multiplexer) isPlex() {}
 
 // Close closes the multiplexer and all of its streams.
 func (m *multiplexer) Close() (err error) {
-	defer func() {
-		r := recoverErr(recover())
-		if r != nil {
-			err = r
-		}
-	}()
+	err = recoverErr(err, recover())
 
 	m.cancel()
 	<-m.ctx.Done()
@@ -74,6 +69,8 @@ func (m *multiplexer) Add(
 	ctx context.Context,
 	objs ...interface{},
 ) error {
+	ctx = merge(m.ctx, ctx)
+
 	return m.queue(ctx, objs...)
 }
 
@@ -85,10 +82,7 @@ func (m *multiplexer) queue(
 	in ...interface{},
 ) (err error) {
 	defer func() {
-		r := recoverErr(recover())
-		if r != nil {
-			err = r
-		}
+		err = recoverErr(err, recover())
 	}()
 
 	for _, incoming := range in {
@@ -259,6 +253,7 @@ func (m *multiplexer) Reader(
 	ctx context.Context,
 	timeout *time.Duration,
 ) (io.ReadCloser, error) {
+	ctx = merge(m.ctx, ctx)
 	var tchan <-chan time.Time
 
 	if timeout != nil {
@@ -307,6 +302,7 @@ func (m *multiplexer) Writer(
 	ctx context.Context,
 	timeout *time.Duration,
 ) (io.WriteCloser, error) {
+	ctx = merge(m.ctx, ctx)
 	var tchan <-chan time.Time
 
 	if timeout != nil {

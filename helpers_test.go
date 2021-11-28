@@ -51,10 +51,16 @@ func randBytes(size int) ([]byte, error) {
 	return buff[:n], nil
 }
 
+type wrappedError interface {
+	error
+	Unwrap() error
+}
+
 func Test_recoverErr(t *testing.T) {
 	testdata := map[string]struct {
-		value    interface{}
-		expected error
+		value      interface{}
+		underlying error
+		expected   error
 	}{
 		"nil": {
 			value:    nil,
@@ -72,11 +78,31 @@ func Test_recoverErr(t *testing.T) {
 			value:    365,
 			expected: errors.New("panic: 365"),
 		},
+		"nil w/ underlying": {
+			value:      nil,
+			expected:   errors.New("underlying"),
+			underlying: errors.New("underlying"),
+		},
+		"string w/ underlying": {
+			value:      "test error",
+			expected:   errors.New("test error"),
+			underlying: errors.New("underlying"),
+		},
+		"error w/ underlying": {
+			value:      errors.New("test error"),
+			expected:   errors.New("test error"),
+			underlying: errors.New("underlying"),
+		},
+		"recover type proxy w/ underlying": {
+			value:      365,
+			expected:   errors.New("panic: 365"),
+			underlying: errors.New("underlying"),
+		},
 	}
 
 	for name, test := range testdata {
 		t.Run(name, func(t *testing.T) {
-			err := recoverErr(test.value)
+			err := recoverErr(test.underlying, test.value)
 			if err == nil && test.expected == nil {
 				return
 			}
@@ -86,6 +112,27 @@ func Test_recoverErr(t *testing.T) {
 					"expected %s, got %s",
 					test.expected.Error(),
 					err.Error(),
+				)
+			}
+
+			under, ok := err.(wrappedError)
+			if !ok {
+				if test.underlying != nil && test.value != nil {
+					t.Fatalf(
+						"expected %s, got %s",
+						test.underlying.Error(),
+						err.Error(),
+					)
+				}
+
+				return
+			}
+
+			if under.Unwrap() != test.underlying {
+				t.Fatalf(
+					"expected %s, got %s",
+					test.underlying.Error(),
+					under.Unwrap().Error(),
 				)
 			}
 		})

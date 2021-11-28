@@ -12,6 +12,7 @@ import (
 // ReadStream to ensure that the ReadStreams are not blocked if that is the
 // desired behavior. Default buffer is 0 (blocking).
 func NewReadStreams(ctx context.Context, buffer int, readers ...io.Reader) []ReadStream {
+	ctx, _ = _ctx(ctx)
 	var streams []ReadStream
 
 	for _, r := range readers {
@@ -26,6 +27,7 @@ func NewReadStreams(ctx context.Context, buffer int, readers ...io.Reader) []Rea
 // ReadStream to ensure that the ReadStreams are not blocked if that is the
 // desired behavior. Default buffer is 0 (blocking).
 func NewWriteStreams(ctx context.Context, buffer int, writers ...io.Writer) []WriteStream {
+	ctx, _ = _ctx(ctx)
 	var streams []WriteStream
 
 	for _, w := range writers {
@@ -40,7 +42,7 @@ func NewWriteStreams(ctx context.Context, buffer int, writers ...io.Writer) []Wr
 // ReadStream to ensure that the ReadStream is not blocked if that is the
 // desired behavior. Default buffer is 0 (blocking).
 func NewReadStream(ctx context.Context, r io.Reader, buffer int) ReadStream {
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := _ctx(ctx)
 
 	return &rStream{
 		ctx:    ctx,
@@ -54,7 +56,7 @@ func NewReadStream(ctx context.Context, r io.Reader, buffer int) ReadStream {
 // WriteStream to ensure that the WriteStream is not blocked if that is the
 // desired behavior. Default buffer is 0 (blocking).
 func NewWriteStream(ctx context.Context, w io.Writer, buffer int) WriteStream {
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := _ctx(ctx)
 
 	ws := &wStream{
 		ctx:    ctx,
@@ -70,6 +72,7 @@ func NewWriteStream(ctx context.Context, w io.Writer, buffer int) WriteStream {
 // Read reads from an io.Reader and pushes to a byte channel
 // one byte at a time. Returns a read-only byte channel.
 func Read(ctx context.Context, r io.Reader, buffer int) <-chan byte {
+	ctx, _ = _ctx(ctx)
 	out := make(chan byte, buffer)
 
 	go func(out chan<- byte, r io.Reader, buffer int) {
@@ -128,6 +131,7 @@ func Read(ctx context.Context, r io.Reader, buffer int) <-chan byte {
 // Write writes from a byte channel to an io.Writer one byte at a time using
 // an intermediary bufio.Writer. Returns a write-only byte channel.
 func Write(ctx context.Context, w io.Writer, buffer int) chan<- byte {
+	ctx, _ = _ctx(ctx)
 	out := make(chan byte, buffer)
 
 	go func(out chan byte, w io.Writer) {
@@ -166,7 +170,7 @@ func StreamFromReadWriter(
 	rw io.ReadWriter,
 	buffer int,
 ) Stream {
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := _ctx(ctx)
 
 	return &rwStream{
 		ctx:    ctx,
@@ -179,7 +183,7 @@ func StreamFromReadWriter(
 // NewStream creates a Stream which creates a stream of data that can be read
 // from or written to.
 func NewStream(ctx context.Context, buffer int) Stream {
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := _ctx(ctx)
 	data := make(chan byte, buffer)
 
 	readCtx, readCancel := context.WithCancel(ctx)
@@ -268,6 +272,8 @@ func (r *rStream) Close() (err error) {
 // reading from the stream which allows the stream to be added back to the pool
 // of available read streams.
 func (r *rStream) Data(ctx context.Context) <-chan byte {
+	ctx = merge(r.ctx, ctx)
+
 	out := make(chan byte) // TODO: add buffer support to API
 
 	go func(out chan<- byte) {
@@ -293,10 +299,7 @@ func (r *rStream) Data(ctx context.Context) <-chan byte {
 // Read is the RStream io.Reader implementation.
 func (r *rStream) Read(p []byte) (n int, err error) {
 	defer func() {
-		r := recoverErr(recover())
-		if r != nil {
-			err = r
-		}
+		err = recoverErr(err, recover())
 	}()
 
 	var ok bool
@@ -348,6 +351,8 @@ func (w *wStream) Close() (err error) {
 // the consumer which called Data causing it to be added back to the pool
 // of available writers.
 func (w *wStream) Data(ctx context.Context) chan<- byte {
+	ctx = merge(w.ctx, ctx)
+
 	in := make(chan byte) // TODO: add buffer support to API
 
 	go func(in <-chan byte) {
@@ -373,10 +378,7 @@ func (w *wStream) Data(ctx context.Context) chan<- byte {
 // Write is the WStream io.Writer implementation.
 func (w *wStream) Write(p []byte) (n int, err error) {
 	defer func() {
-		r := recoverErr(recover())
-		if r != nil {
-			err = r
-		}
+		err = recoverErr(err, recover())
 	}()
 
 	for _, b := range p {

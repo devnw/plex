@@ -6,7 +6,7 @@ import (
 
 // New creates a new Multiplexer using the provided io.ReadWriters
 func New(ctx context.Context, opts ...Option) (Multiplexer, error) {
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := _ctx(ctx)
 
 	m := &multiplexer{
 		ctx:    ctx,
