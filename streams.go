@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 )
 
@@ -255,16 +256,27 @@ var _ ReadStream = (*rStream)(nil)
 type rStream struct {
 	ctx    context.Context
 	cancel context.CancelFunc
-	r      <-chan byte
+
+	wg sync.WaitGroup
+	mu sync.Mutex
+
+	r <-chan byte
 }
 
 func (r *rStream) Close() (err error) {
 	defer func() {
-		_ = recover()
+		err = recoverErr(err, recover())
 	}()
 
 	r.cancel()
-	return nil
+	<-r.ctx.Done()
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.wg.Wait()
+
+	return err
 }
 
 // Data returns a read-only channel of bytes which read from an underlying
@@ -276,7 +288,13 @@ func (r *rStream) Data(ctx context.Context) <-chan byte {
 
 	out := make(chan byte) // TODO: add buffer support to API
 
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.wg.Add(1)
+
 	go func(out chan<- byte) {
+		defer r.wg.Done()
+
 		defer func() {
 			_ = recover() // TODO: handle in the future?
 		}()
@@ -333,16 +351,27 @@ var _ WriteStream = (*wStream)(nil)
 type wStream struct {
 	ctx    context.Context
 	cancel context.CancelFunc
-	w      chan<- byte
+
+	wg sync.WaitGroup
+	mu sync.Mutex
+
+	w chan<- byte
 }
 
 func (w *wStream) Close() (err error) {
 	defer func() {
-		_ = recover()
+		err = recoverErr(err, recover())
 	}()
 
 	w.cancel()
-	return nil
+	<-w.ctx.Done()
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	w.wg.Wait()
+
+	return err
 }
 
 // Data returns a write-only channel of bytes which write to an underlying
@@ -355,7 +384,13 @@ func (w *wStream) Data(ctx context.Context) chan<- byte {
 
 	in := make(chan byte) // TODO: add buffer support to API
 
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.wg.Add(1)
+
 	go func(in <-chan byte) {
+		defer w.wg.Done()
+
 		defer func() {
 			_ = recover() // TODO: handle in the future?
 		}()

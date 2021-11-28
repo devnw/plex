@@ -3,6 +3,7 @@ package plex
 import (
 	"context"
 	"io"
+	"sync"
 	"time"
 )
 
@@ -13,6 +14,8 @@ import (
 type multiplexer struct {
 	ctx    context.Context
 	cancel context.CancelFunc
+	plexWg sync.WaitGroup
+	plexMu sync.Mutex
 
 	readBufferSize  int
 	writeBufferSize int
@@ -35,33 +38,22 @@ func (m *multiplexer) isPlex() {}
 
 // Close closes the multiplexer and all of its streams.
 func (m *multiplexer) Close() (err error) {
-	err = recoverErr(err, recover())
+	defer func() {
+		err = recoverErr(err, recover())
+	}()
+
+	defer close(m.readers)
+	defer close(m.writers)
 
 	m.cancel()
 	<-m.ctx.Done()
 
+	m.plexMu.Lock()
+	defer m.plexMu.Unlock()
+
+	m.plexWg.Wait()
+
 	return err
-}
-
-// cleanup handles the cleanup of the multiplexer when the context is canceled.
-func (m *multiplexer) cleanup() {
-	go func() {
-		// Clean up the internal channels
-		defer close(m.readers)
-		defer close(m.writers)
-
-		<-m.ctx.Done()
-
-		// Drain the readers channel and close them
-		for stream := range m.readers {
-			stream.Close()
-		}
-
-		// Drain the writers channel and close them
-		for stream := range m.writers {
-			stream.Close()
-		}
-	}()
 }
 
 // Add adds any passed io.Reader/io.Writer, io.ReadWriter to the multiplexer.

@@ -61,8 +61,5 @@ func New(ctx context.Context, opts ...Option) (Multiplexer, error) {
 	m.initWritePool = nil
 	m.initReadWritePool = nil
 
-	// initialize cleanup routine
-	go m.cleanup()
-
 	return m, nil
 }

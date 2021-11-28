@@ -320,7 +320,7 @@ func Test_Read(t *testing.T) {
 			out := Read(ctx, stream, 0)
 
 		readloop:
-			for i := 0; ; i++ {
+			for i := 0; i < len(test); i++ {
 				select {
 				case <-ctx.Done():
 					t.Fatal("context done")
