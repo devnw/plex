@@ -111,9 +111,6 @@ func Test_Streams_Write(t *testing.T) {
 				}
 			}()
 
-			// Data transfer channels
-			read := rws.Out(ctx)
-
 			go func(rws Stream) {
 				// Ignoring this is fine because if it panic's due to an
 				// issue with a closed channel that is correct, if it doesn't
@@ -135,9 +132,11 @@ func Test_Streams_Write(t *testing.T) {
 				}
 			}(rws)
 
-			var i int
+			// Data transfer channels
+			read := rws.Out(ctx)
+
 		readloop:
-			for i = 0; i < len(test); i++ {
+			for i := 0; i < len(test); i++ {
 				select {
 				case <-ctx.Done():
 					t.Fatalf("context done | %s", ctx.Err())

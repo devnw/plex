@@ -87,6 +87,13 @@ func Test_Multiplexer_Multi_Reader(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 
+	defer func() {
+		err := m.Close()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}()
+
 	for i := 0; i < len(data); i++ {
 		rc, err := m.Reader(ctx, nil)
 		if err != nil {
@@ -135,72 +142,88 @@ func Test_Multiplexer_Multi_Reader(t *testing.T) {
 	}
 }
 
-// func Test_Multplexer_Writer(t *testing.T) {
-// 	data, err := setOfRandBytes(100)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
+func Test_Multplexer_Writer(t *testing.T) {
+	data, err := setOfRandBytes(100)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-// 	for sum, test := range data {
-// 		t.Run(sum, func(t *testing.T) {
-// 			t.Logf("data length: %v bytes", len(test))
+	for sum, test := range data {
+		t.Run(sum, func(t *testing.T) {
+			t.Logf("data length: %v bytes", len(test))
 
-// 			ctx, cancel := context.WithCancel(context.Background())
-// 			defer cancel()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
 
-// 			stream := NewStream(ctx, 0)
+			stream := NewStream(ctx, 0)
 
-// 			m, err := New(
-// 				ctx,
-// 				WithReadWriters(stream),
-// 			)
-// 			if err != nil {
-// 				t.Errorf("unexpected error: %v", err)
-// 			}
+			m, err := New(
+				ctx,
+				WithWriters(stream),
+			)
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
 
-// 			go func() {
+			defer func() {
+				err := m.Close()
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			}()
 
-// 				wc, err := m.Writer(ctx, nil)
-// 				if err != nil {
-// 					t.Errorf("unexpected error: %v", err)
-// 				}
-// 				defer wc.Close()
+			testdata := make([]byte, len(test))
+			copy(testdata, test)
 
-// 				n, err := wc.Write(test)
-// 				if err != nil {
-// 					t.Errorf("unexpected error: %v", err)
-// 				}
+			go func(testdata []byte) {
 
-// 				if n != len(test) {
-// 					t.Errorf("unexpected write length: %d", n)
-// 				}
-// 			}()
+				wc, err := m.Writer(ctx, nil)
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				defer wc.Close()
 
-// 			data := stream.Out(ctx)
+				var total int
+				var read int
+				for total < len(testdata) {
 
-// 		readloop:
-// 			for i := 0; ; i++ {
-// 				select {
-// 				case <-ctx.Done():
-// 					t.Fatalf("unexpected error: %v", ctx.Err())
-// 				case bte, ok := <-data:
-// 					if !ok {
-// 						break readloop
-// 					}
+					read, err = wc.Write(testdata[read:])
+					if err != nil {
+						t.Errorf("unexpected error: %v", err)
+						return
+					}
 
-// 					if test[i] != bte {
-// 						t.Fatalf(
-// 							"byte mismatch at index %v; expected %v; got %v",
-// 							i,
-// 							test[i],
-// 							bte,
-// 						)
-// 					}
-// 				}
-// 			}
-// 		})
-// 	}
-// }
+					total += read
+				}
+			}(testdata)
+
+			data := stream.Out(ctx)
+
+		readloop:
+			for i := 0; i < len(test); i++ {
+				select {
+				case <-ctx.Done():
+					t.Fatalf("unexpected error: %v", ctx.Err())
+				case bte, ok := <-data:
+					if !ok {
+						break readloop
+					}
+
+					t.Logf("%v: %v", i, bte)
+
+					if test[i] != bte {
+						t.Fatalf(
+							"byte mismatch at index %v; expected %v; got %v",
+							i,
+							test[i],
+							bte,
+						)
+					}
+				}
+			}
+		})
+	}
+}
 
 // func Test_Out(t *testing.T) {
 // 	testdata := map[string]struct {

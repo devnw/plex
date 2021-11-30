@@ -274,9 +274,16 @@ func (m *multiplexer) Reader(
 			r:      r,
 			buffer: m.readBufferSize,
 			cleanup: func() error {
-				// This is already a read stream so
-				// no need to update the buffer
-				return m.queue(ctx, -1, r)
+				select {
+				case <-m.ctx.Done():
+				case <-rctx.Done():
+				default:
+					// This is already a read stream so
+					// no need to update the buffer
+					return m.queue(ctx, -1, r)
+				}
+
+				return nil
 			},
 		}, nil
 	}
@@ -323,9 +330,16 @@ func (m *multiplexer) Writer(
 			w:      w,
 			buffer: m.writeBufferSize,
 			cleanup: func() error {
-				// This is already a read stream so
-				// no need to update the buffer
-				return m.queue(ctx, -1, w)
+				select {
+				case <-m.ctx.Done():
+				case <-wctx.Done():
+				default:
+					// This is already a read stream so
+					// no need to update the buffer
+					return m.queue(ctx, -1, w)
+				}
+
+				return nil
 			},
 		}, nil
 	}

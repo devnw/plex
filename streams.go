@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"sync"
-	"time"
 )
 
 // NewReadStreams creates a set of ReadStreams from a slice of io.Reader.
@@ -64,8 +63,6 @@ func NewWriteStream(ctx context.Context, w io.Writer, buffer int) WriteStream {
 		cancel: cancel,
 		w:      Write(ctx, w, buffer),
 	}
-
-	go cleanup(ctx, ws.w)
 
 	return ws
 }
@@ -153,8 +150,8 @@ func Write(ctx context.Context, w io.Writer, buffer int) chan<- byte {
 					return
 				}
 
-				n, err := w.Write([]byte{b})
-				if err != nil || n == 0 {
+				_, err := w.Write([]byte{b})
+				if err != nil {
 					return
 				}
 			}
@@ -164,37 +161,33 @@ func Write(ctx context.Context, w io.Writer, buffer int) chan<- byte {
 	return out
 }
 
-// StreamFromReadWriter creates a ReadWriteStream which is a combination of
-// a ReadStream and a WriteStream wrapped around a single io.ReadWriter.
-func StreamFromReadWriter(
-	ctx context.Context,
-	rw io.ReadWriter,
-	buffer int,
-) Stream {
-	ctx, cancel := _ctx(ctx)
+// // StreamFromReadWriter creates a ReadWriteStream which is a combination of
+// // a ReadStream and a WriteStream wrapped around a single io.ReadWriter.
+// func StreamFromReadWriter(
+// 	ctx context.Context,
+// 	rw io.ReadWriter,
+// 	buffer int,
+// ) Stream {
+// 	ctx, cancel := _ctx(ctx)
 
-	return &rwStream{
-		ctx:    ctx,
-		cancel: cancel,
-		r:      NewReadStream(ctx, rw, buffer),
-		w:      NewWriteStream(ctx, rw, buffer),
-	}
-}
+// 	return &rwStream{
+// 		ctx:    ctx,
+// 		cancel: cancel,
+// 		r:      NewReadStream(ctx, rw, buffer),
+// 		w:      NewWriteStream(ctx, rw, buffer),
+// 	}
+// }
 
 // NewStream creates a Stream which creates a stream of data that can be read
 // from or written to.
 func NewStream(ctx context.Context, buffer int) Stream {
 	ctx, cancel := _ctx(ctx)
-	data := make(chan byte, buffer)
-
-	readCtx, readCancel := context.WithCancel(ctx)
-	writeCtx, writeCancel := context.WithCancel(ctx)
 
 	return &rwStream{
 		ctx:    ctx,
 		cancel: cancel,
-		r:      &rStream{ctx: readCtx, cancel: readCancel, r: data},
-		w:      &wStream{ctx: writeCtx, cancel: writeCancel, w: data},
+		data:   make(chan byte, buffer),
+		buffer: buffer,
 	}
 }
 
@@ -204,44 +197,150 @@ var _ Stream = (*rwStream)(nil)
 type rwStream struct {
 	ctx    context.Context
 	cancel context.CancelFunc
-	r      ReadStream
-	w      WriteStream
+	data   chan byte
+	mu     sync.Mutex
+	wg     sync.WaitGroup
+	buffer int
 }
 
 func (rws *rwStream) Out(ctx context.Context) <-chan byte {
-	return rws.r.Data(ctx)
+	ctx = merge(rws.ctx, ctx)
+	out := make(chan byte, rws.buffer)
+
+	rws.mu.Lock()
+	defer rws.mu.Unlock()
+	rws.wg.Add(1)
+
+	go func(out chan<- byte, in <-chan byte) {
+		defer func() {
+			_ = recover() // TODO: handle in the future?
+		}()
+		defer rws.wg.Done()
+		defer close(out)
+
+		for {
+			select {
+			case <-rws.ctx.Done():
+				return
+			case <-ctx.Done():
+				return
+			case b, ok := <-in:
+				if !ok {
+					return
+				}
+
+				select {
+				case <-rws.ctx.Done():
+					return
+				case <-ctx.Done():
+					return
+				case out <- b:
+				}
+			}
+		}
+
+	}(out, rws.data)
+
+	return out
 }
 
 func (rws *rwStream) In(ctx context.Context) chan<- byte {
-	return rws.w.Data(ctx)
+	ctx = merge(rws.ctx, ctx)
+	in := make(chan byte, rws.buffer)
+
+	rws.mu.Lock()
+	defer rws.mu.Unlock()
+	rws.wg.Add(1)
+
+	go func(internal chan<- byte, in <-chan byte) {
+		defer func() {
+			_ = recover() // TODO: handle in the future?
+		}()
+		defer rws.wg.Done()
+
+		for {
+			select {
+			case <-rws.ctx.Done():
+				return
+			case <-ctx.Done():
+				return
+			case b, ok := <-in:
+				if !ok {
+					return
+				}
+
+				select {
+				case <-rws.ctx.Done():
+					return
+				case <-ctx.Done():
+					return
+				case internal <- b:
+				}
+			}
+		}
+
+	}(rws.data, in)
+
+	return in
 }
 
 func (rws *rwStream) Read(p []byte) (n int, err error) {
-	return rws.r.Read(p)
+	max := len(p)
+	if rws.buffer > 0 && max > rws.buffer {
+		max = rws.buffer
+	}
+
+	var i int
+	for i = 0; i < max; i++ {
+		select {
+		case <-rws.ctx.Done():
+			return 0, rws.ctx.Err()
+		case b, ok := <-rws.data:
+			if !ok {
+				return 0, io.EOF
+			}
+
+			p[i] = b
+		}
+	}
+
+	return i, nil
 }
 
 func (rws *rwStream) Write(p []byte) (n int, err error) {
-	return rws.w.Write(p)
+	max := len(p)
+	if rws.buffer > 0 && max > rws.buffer {
+		max = rws.buffer
+	}
+
+	var i int
+	for i = 0; i < max; i++ {
+		select {
+		case <-rws.ctx.Done():
+			return 0, rws.ctx.Err()
+		case rws.data <- p[i]:
+		}
+	}
+
+	return i, nil
 }
 
 func (rws *rwStream) Close() (err error) {
 	defer func() {
-		_ = recover()
+		err = recoverErr(err, recover())
 	}()
 
-	defer rws.cancel()
+	defer close(rws.data)
 
-	err = rws.w.Close()
-	if err != nil {
-		// TODO:
-		fmt.Printf("Error closing wstream %s", err)
-	}
+	rws.cancel()
+	<-rws.ctx.Done()
 
-	err = rws.r.Close()
-	if err != nil {
-		// TODO:
-		fmt.Printf("Error closing rstream %s", err)
-	}
+	rws.mu.Lock()
+	defer rws.mu.Unlock()
+
+	fmt.Println("Waiting for all goroutines to finish")
+	rws.wg.Wait()
+	fmt.Println("All goroutines finished")
 
 	return err
 }
@@ -426,25 +525,4 @@ func (w *wStream) Write(p []byte) (n int, err error) {
 	}
 
 	return n, nil
-}
-
-func cleanup(ctx context.Context, writeChannel chan<- byte) {
-	defer func() {
-		_ = recover()
-	}()
-
-	// Close the internal channel on close
-	defer close(writeChannel)
-
-	<-ctx.Done()
-
-	// NOTE: This is still a race here...
-	timer := time.NewTimer(time.Millisecond)
-	for len(writeChannel) > 0 {
-		select {
-		case <-timer.C:
-			return
-		default:
-		}
-	}
 }
