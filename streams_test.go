@@ -302,6 +302,7 @@ func Test_Read(t *testing.T) {
 				defer func() {
 					err := stream.Close()
 					if err != nil {
+						t.Logf("%T", err)
 						t.Error(err)
 					}
 				}()

@@ -176,7 +176,6 @@ func Test_Multplexer_Writer(t *testing.T) {
 			copy(testdata, test)
 
 			go func(testdata []byte) {
-
 				wc, err := m.Writer(ctx, nil)
 				if err != nil {
 					t.Errorf("unexpected error: %v", err)
@@ -186,7 +185,6 @@ func Test_Multplexer_Writer(t *testing.T) {
 				var total int
 				var read int
 				for total < len(testdata) {
-
 					read, err = wc.Write(testdata[read:])
 					if err != nil {
 						t.Errorf("unexpected error: %v", err)
@@ -208,8 +206,6 @@ func Test_Multplexer_Writer(t *testing.T) {
 					if !ok {
 						break readloop
 					}
-
-					t.Logf("%v: %v", i, bte)
 
 					if test[i] != bte {
 						t.Fatalf(

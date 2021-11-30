@@ -2,7 +2,6 @@ package plex
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"sync"
 )
@@ -238,7 +237,6 @@ func (rws *rwStream) Out(ctx context.Context) <-chan byte {
 				}
 			}
 		}
-
 	}(out, rws.data)
 
 	return out
@@ -278,7 +276,6 @@ func (rws *rwStream) In(ctx context.Context) chan<- byte {
 				}
 			}
 		}
-
 	}(rws.data, in)
 
 	return in
@@ -325,9 +322,9 @@ func (rws *rwStream) Write(p []byte) (n int, err error) {
 	return i, nil
 }
 
-func (rws *rwStream) Close() (err error) {
+func (rws *rwStream) Close() error {
 	defer func() {
-		err = recoverErr(err, recover())
+		_ = recover() // TODO: handle in the future?
 	}()
 
 	defer close(rws.data)
@@ -338,11 +335,9 @@ func (rws *rwStream) Close() (err error) {
 	rws.mu.Lock()
 	defer rws.mu.Unlock()
 
-	fmt.Println("Waiting for all goroutines to finish")
 	rws.wg.Wait()
-	fmt.Println("All goroutines finished")
 
-	return err
+	return nil
 }
 
 // Interface enforcer
@@ -364,7 +359,7 @@ type rStream struct {
 
 func (r *rStream) Close() (err error) {
 	defer func() {
-		err = recoverErr(err, recover())
+		_ = recover() // TODO: handle in the future?
 	}()
 
 	r.cancel()
@@ -459,7 +454,7 @@ type wStream struct {
 
 func (w *wStream) Close() (err error) {
 	defer func() {
-		err = recoverErr(err, recover())
+		_ = recover() // TODO: handle in the future?
 	}()
 
 	w.cancel()
