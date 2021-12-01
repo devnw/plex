@@ -2,6 +2,7 @@ package plex
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha1"
 	"errors"
 	"fmt"
@@ -9,6 +10,57 @@ import (
 	"math/rand"
 	"testing"
 )
+
+type ctxtest struct {
+	parent context.Context
+	child  context.Context
+}
+
+func ctxCancelTests() map[string]ctxtest {
+	ctx := context.Background()
+
+	cancelledCtx, cancelledCancel := context.WithCancel(context.Background())
+	cancelledCancel()
+
+	return map[string]ctxtest{
+		"child cancel": {
+			parent: ctx,
+			child:  cancelledCtx,
+		},
+		"parent cancel": {
+			parent: cancelledCtx,
+			child:  ctx,
+		},
+		"parent cancel, nil child": {
+			parent: cancelledCtx,
+			child:  nil,
+		},
+	}
+}
+
+func (test ctxtest) Eval(t *testing.T, err error) {
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+
+	if err != context.Canceled {
+		t.Fatalf("expected context canceled; got %v", err)
+	}
+
+	if test.parent != nil {
+		if test.parent.Err() == err {
+			return
+		}
+	}
+
+	if test.child != nil {
+		if test.child.Err() == err {
+			return
+		}
+	}
+
+	t.Fatalf("expected error to match parent or child")
+}
 
 // SumByteSlice is a map with a key which is the sha1sum of the byte slice
 type SumByteSlice map[string][]byte
@@ -134,6 +186,61 @@ func Test_recoverErr(t *testing.T) {
 					test.underlying.Error(),
 					under.Unwrap().Error(),
 				)
+			}
+		})
+	}
+}
+
+func Test_ctx(t *testing.T) {
+	testdata := map[string]struct {
+		ctx context.Context
+	}{
+		"non nil": {
+			context.Background(),
+		},
+		"nil": {
+			nil,
+		},
+	}
+
+	for name, test := range testdata {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := _ctx(test.ctx)
+			if ctx == nil {
+				t.Fatal("expected non nil context")
+			}
+
+			if cancel == nil {
+				t.Fatal("expected non nil cancel")
+			}
+		})
+	}
+}
+
+func Test_merge(t *testing.T) {
+	testdata := map[string]struct {
+		parent context.Context
+		child  context.Context
+	}{
+		"non-nil": {
+			parent: context.Background(),
+			child:  context.TODO(),
+		},
+		"nil": {
+			parent: context.Background(),
+			child:  nil,
+		},
+	}
+
+	for name, test := range testdata {
+		t.Run(name, func(t *testing.T) {
+			ctx := merge(test.parent, test.child)
+			if ctx == nil {
+				t.Fatal("expected non nil context")
+			}
+
+			if test.child != nil && ctx != test.child {
+				t.Fatal("expected child context")
 			}
 		})
 	}

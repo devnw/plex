@@ -12,6 +12,10 @@ type Option func(*multiplexer) error
 // NOTE: This also applies to the io.Reader implementation of an io.ReadWriter.
 func WithReadBuffer(size int) Option {
 	return func(m *multiplexer) error {
+		if size < 0 {
+			size = 0
+		}
+
 		m.readBufferSize = size
 		return nil
 	}
@@ -21,6 +25,10 @@ func WithReadBuffer(size int) Option {
 // NOTE: This also applies to the io.Writer implementation of an io.ReadWriter.
 func WithWriteBuffer(size int) Option {
 	return func(m *multiplexer) error {
+		if size < 0 {
+			size = 0
+		}
+
 		m.writeBufferSize = size
 		return nil
 	}

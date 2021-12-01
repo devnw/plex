@@ -32,6 +32,13 @@ func Test_Multiplexer_Reader(t *testing.T) {
 				t.Errorf("unexpected error: %v", err)
 			}
 
+			defer func() {
+				err = m.Close()
+				if err != nil {
+					t.Errorf("Publisher.Close() failed: %v", err)
+				}
+			}()
+
 			rc, err := m.Reader(ctx, nil)
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
@@ -372,3 +379,30 @@ func Test_Multplexer_Writer(t *testing.T) {
 // 		})
 // 	}
 // }
+
+func Test_multiplexer_queueWriters_canceled(t *testing.T) {
+	for name, test := range ctxCancelTests() {
+		t.Run(name, func(t *testing.T) {
+			m := &multiplexer{ctx: test.parent}
+			test.Eval(t, m.queueWriters(test.child, bytes.NewBuffer([]byte("test"))))
+		})
+	}
+}
+
+func Test_multiplexer_queueReaders_canceled(t *testing.T) {
+	for name, test := range ctxCancelTests() {
+		t.Run(name, func(t *testing.T) {
+			m := &multiplexer{ctx: test.parent}
+			test.Eval(t, m.queueReaders(test.child, bytes.NewBuffer([]byte("test"))))
+		})
+	}
+}
+
+func Test_multiplexer_queueReadWriters_canceled(t *testing.T) {
+	for name, test := range ctxCancelTests() {
+		t.Run(name, func(t *testing.T) {
+			m := &multiplexer{ctx: test.parent}
+			test.Eval(t, m.queueReadWriters(test.child, bytes.NewBuffer([]byte("test"))))
+		})
+	}
+}

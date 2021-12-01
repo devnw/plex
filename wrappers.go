@@ -33,6 +33,7 @@ func (w *writer) Close() (err error) {
 	}
 
 	w.cancel()
+	<-w.ctx.Done()
 
 	return nil
 }
@@ -64,6 +65,7 @@ func (r *reader) Close() (err error) {
 	}
 
 	r.cancel()
+	<-r.ctx.Done()
 
 	return nil
 }
