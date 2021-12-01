@@ -4,12 +4,18 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha1"
+	"errors"
 	"fmt"
 	"io"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 )
+
+// This is a stupid test, only for coverage
+func Test_isPlex(t *testing.T) {
+	(&multiplexer{}).isPlex()
+}
 
 func Test_Multiplexer_Reader(t *testing.T) {
 	data, err := setOfRandBytes(100)
@@ -431,5 +437,95 @@ func Test_multiplexer_queue_canceled(t *testing.T) {
 			m := &multiplexer{ctx: test.parent}
 			test.Eval(t, m.queue(test.child, &wStream{}))
 		})
+	}
+}
+
+func Test_multiplexer_Add_canceled(t *testing.T) {
+	for name, test := range ctxCancelTests() {
+		t.Run(name, func(t *testing.T) {
+			m := &multiplexer{ctx: test.parent}
+			test.Eval(t, m.Add(test.child, &wStream{}))
+		})
+	}
+}
+
+func evalErr(err error) error {
+	if err == nil {
+		return errors.New("Expected error")
+	}
+
+	if err != context.Canceled {
+		return fmt.Errorf("Expected context.Canceled; got %v", err)
+	}
+
+	return nil
+}
+
+// NOTE: These still contain a possible race because the select could choose
+// the non-ctx Done option, but running it 100000 times like this didn't fail
+// the tests
+func Test_multiplexer_New_Writer_canceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var err error
+	for i := 0; i < 100; i++ {
+		_, err = New(
+			ctx,
+			WithWriters(bytes.NewBuffer([]byte("test"))),
+		)
+
+		err = evalErr(err)
+		if err == nil {
+			return
+		}
+	}
+
+	if err != nil {
+		t.Error(err)
+	}
+}
+
+func Test_multiplexer_New_Reader_canceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var err error
+	for i := 0; i < 100; i++ {
+		_, err = New(
+			ctx,
+			WithReaders(bytes.NewBuffer([]byte("test"))),
+		)
+
+		err = evalErr(err)
+		if err == nil {
+			return
+		}
+	}
+
+	if err != nil {
+		t.Error(err)
+	}
+}
+
+func Test_multiplexer_New_ReaderWriter_canceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var err error
+	for i := 0; i < 100; i++ {
+		_, err = New(
+			ctx,
+			WithReadWriters(bytes.NewBuffer([]byte("test"))),
+		)
+
+		err = evalErr(err)
+		if err == nil {
+			return
+		}
+	}
+
+	if err != nil {
+		t.Error(err)
 	}
 }
