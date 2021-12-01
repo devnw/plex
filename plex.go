@@ -94,7 +94,6 @@ func (m *multiplexer) queue(
 	ctx = merge(m.ctx, ctx)
 
 	for _, incoming := range in {
-		// TODO: update after nested context is implemented
 		select {
 		case <-m.ctx.Done():
 			return m.ctx.Err()
@@ -146,7 +145,6 @@ func (m *multiplexer) queueReadStreams(
 	ctx = merge(m.ctx, ctx)
 
 	for _, stream := range streams {
-		// TODO: update after nested context is implemented
 		select {
 		case <-m.ctx.Done():
 			return m.ctx.Err()
@@ -166,7 +164,6 @@ func (m *multiplexer) queueWriteStreams(
 	ctx = merge(m.ctx, ctx)
 
 	for _, stream := range streams {
-		// TODO: update after nested context is implemented
 		select {
 		case <-m.ctx.Done():
 			return m.ctx.Err()
