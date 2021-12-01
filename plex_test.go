@@ -387,60 +387,6 @@ func Test_Multplexer_Writer(t *testing.T) {
 // 	}
 // }
 
-func Test_multiplexer_queueWriters_canceled(t *testing.T) {
-	for name, test := range ctxCancelTests() {
-		t.Run(name, func(t *testing.T) {
-			m := &multiplexer{ctx: test.parent}
-			test.Eval(t, m.queueWriters(test.child, bytes.NewBuffer([]byte("test"))))
-		})
-	}
-}
-
-func Test_multiplexer_queueReaders_canceled(t *testing.T) {
-	for name, test := range ctxCancelTests() {
-		t.Run(name, func(t *testing.T) {
-			m := &multiplexer{ctx: test.parent}
-			test.Eval(t, m.queueReaders(test.child, bytes.NewBuffer([]byte("test"))))
-		})
-	}
-}
-
-func Test_multiplexer_queueReadWriters_canceled(t *testing.T) {
-	for name, test := range ctxCancelTests() {
-		t.Run(name, func(t *testing.T) {
-			m := &multiplexer{ctx: test.parent}
-			test.Eval(t, m.queueReadWriters(test.child, bytes.NewBuffer([]byte("test"))))
-		})
-	}
-}
-
-func Test_multiplexer_queueReadStreams_canceled(t *testing.T) {
-	for name, test := range ctxCancelTests() {
-		t.Run(name, func(t *testing.T) {
-			m := &multiplexer{ctx: test.parent}
-			test.Eval(t, m.queueReadStreams(test.child, &rStream{}))
-		})
-	}
-}
-
-func Test_multiplexer_queueWriteStreams_canceled(t *testing.T) {
-	for name, test := range ctxCancelTests() {
-		t.Run(name, func(t *testing.T) {
-			m := &multiplexer{ctx: test.parent}
-			test.Eval(t, m.queueWriteStreams(test.child, &wStream{}))
-		})
-	}
-}
-
-func Test_multiplexer_queue_canceled(t *testing.T) {
-	for name, test := range ctxCancelTests() {
-		t.Run(name, func(t *testing.T) {
-			m := &multiplexer{ctx: test.parent}
-			test.Eval(t, m.queue(test.child, &wStream{}))
-		})
-	}
-}
-
 func Test_multiplexer_Add_canceled(t *testing.T) {
 	for name, test := range ctxCancelTests() {
 		t.Run(name, func(t *testing.T) {
