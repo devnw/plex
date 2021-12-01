@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 )
@@ -445,6 +446,32 @@ func Test_multiplexer_Add_canceled(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			m := &multiplexer{ctx: test.parent}
 			test.Eval(t, m.Add(test.child, &wStream{}))
+		})
+	}
+}
+
+func Test_multiplexer_Reader_canceled(t *testing.T) {
+	for name, test := range ctxCancelTests() {
+		t.Run(name, func(t *testing.T) {
+			m := &multiplexer{ctx: test.parent}
+
+			timeout := time.Second
+			_, err := m.Reader(test.child, &timeout)
+
+			test.Eval(t, err)
+		})
+	}
+}
+
+func Test_multiplexer_Writer_canceled(t *testing.T) {
+	for name, test := range ctxCancelTests() {
+		t.Run(name, func(t *testing.T) {
+			m := &multiplexer{ctx: test.parent}
+
+			timeout := time.Second
+			_, err := m.Writer(test.child, &timeout)
+
+			test.Eval(t, err)
 		})
 	}
 }
