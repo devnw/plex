@@ -15,6 +15,10 @@ func NewReadStreams(ctx context.Context, buffer int, readers ...io.Reader) []Rea
 	var streams []ReadStream
 
 	for _, r := range readers {
+		if r == nil {
+			continue
+		}
+
 		streams = append(streams, NewReadStream(ctx, r, buffer))
 	}
 
@@ -30,6 +34,10 @@ func NewWriteStreams(ctx context.Context, buffer int, writers ...io.Writer) []Wr
 	var streams []WriteStream
 
 	for _, w := range writers {
+		if w == nil {
+			continue
+		}
+
 		streams = append(streams, NewWriteStream(ctx, w, buffer))
 	}
 

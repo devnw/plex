@@ -5,9 +5,144 @@ import (
 	"context"
 	"crypto/sha1"
 	"fmt"
+	"io"
 	"testing"
 	"time"
 )
+
+func Test_NewReadStreams(t *testing.T) {
+	testdata := map[string]struct {
+		readers  []io.Reader
+		expected int
+	}{
+		"single": {
+			[]io.Reader{bytes.NewBuffer([]byte("test"))},
+			1,
+		},
+		"multiple": {
+			[]io.Reader{
+				bytes.NewBuffer([]byte("test")),
+				bytes.NewBuffer([]byte("test")),
+				bytes.NewBuffer([]byte("test")),
+				bytes.NewBuffer([]byte("test")),
+				bytes.NewBuffer([]byte("test")),
+			},
+			5,
+		},
+		"multiple, nil interleaved": {
+			[]io.Reader{
+				bytes.NewBuffer([]byte("test")),
+				nil,
+				bytes.NewBuffer([]byte("test")),
+				nil,
+				bytes.NewBuffer([]byte("test")),
+			},
+			3,
+		},
+		"single nil": {
+			[]io.Reader{
+				nil,
+			},
+			0,
+		},
+		"only nil": {
+			[]io.Reader{
+				nil,
+				nil,
+				nil,
+			},
+			0,
+		},
+		"empty": {
+			[]io.Reader{},
+			0,
+		},
+	}
+
+	for name, test := range testdata {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			streams := NewReadStreams(ctx, 0, test.readers...)
+
+			if test.expected > 0 && streams == nil {
+				t.Fatal("expected streams")
+			}
+
+			if len(streams) != test.expected {
+				t.Fatalf("expected %v streams, got %v", test.expected, len(streams))
+			}
+		})
+	}
+}
+
+func Test_NewWriteStreams(t *testing.T) {
+	testdata := map[string]struct {
+		writers  []io.Writer
+		expected int
+	}{
+		"single": {
+			[]io.Writer{bytes.NewBuffer([]byte("test"))},
+			1,
+		},
+		"multiple": {
+			[]io.Writer{
+				bytes.NewBuffer([]byte("test")),
+				bytes.NewBuffer([]byte("test")),
+				bytes.NewBuffer([]byte("test")),
+				bytes.NewBuffer([]byte("test")),
+				bytes.NewBuffer([]byte("test")),
+			},
+			5,
+		},
+		"multiple, nil interleaved": {
+			[]io.Writer{
+				bytes.NewBuffer([]byte("test")),
+				nil,
+				bytes.NewBuffer([]byte("test")),
+				nil,
+				bytes.NewBuffer([]byte("test")),
+			},
+			3,
+		},
+		"single nil": {
+			[]io.Writer{
+				nil,
+			},
+			0,
+		},
+		"only nil": {
+			[]io.Writer{
+				nil,
+				nil,
+				nil,
+			},
+			0,
+		},
+		"empty": {
+			[]io.Writer{},
+			0,
+		},
+	}
+
+	for name, test := range testdata {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			streams := NewWriteStreams(ctx, 0, test.writers...)
+
+			if test.expected > 0 && streams == nil {
+				t.Fatal("expected streams")
+			}
+
+			if len(streams) != test.expected {
+				t.Fatalf("expected %v streams, got %v", test.expected, len(streams))
+			}
+		})
+	}
+}
 
 func Test_Streams_Read(t *testing.T) {
 	data, err := setOfRandBytes(100)
