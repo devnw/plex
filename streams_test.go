@@ -272,6 +272,7 @@ func Test_WriteStream(t *testing.T) {
 				}()
 
 				in := wstream.Data(ctx)
+				defer close(in)
 
 				for i := 0; i < len(testdata); i++ {
 					select {

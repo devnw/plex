@@ -500,7 +500,6 @@ func (w *wStream) Data(ctx context.Context) chan<- byte {
 		for {
 			select {
 			case <-w.ctx.Done():
-				defer close(w.w) // TODO: Move these to a defer func called on init
 				return
 			case <-ctx.Done():
 				return
