@@ -77,6 +77,95 @@ func Test_NewReadStreams(t *testing.T) {
 	}
 }
 
+func Test_ReadStream_Close(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	testdata := []byte("testtesttest")
+
+	stream := NewReadStream(
+		ctx,
+		bytes.NewBuffer(
+			testdata,
+		),
+		0,
+	)
+
+	data := stream.Data(ctx)
+
+	for i := 0; i < len(testdata); i++ {
+		select {
+		case <-ctx.Done():
+			return
+		case bte, ok := <-data:
+			if !ok {
+				return
+			}
+
+			if bte != testdata[i] {
+				t.Fatalf("expected %v, got %v", testdata[i], bte)
+			}
+
+			// Cancel the context
+			if i == 1 {
+				stream.Close()
+			}
+		}
+	}
+
+	t.Fatalf("expected to be closed")
+}
+
+func Test_ReadStream(t *testing.T) {
+	data, err := setOfRandBytes(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for sum, test := range data {
+		t.Run(sum, func(t *testing.T) {
+			t.Logf("data length: %v bytes", len(test))
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			stream := NewReadStream(
+				ctx,
+				bytes.NewBuffer(
+					test,
+				),
+				0,
+			)
+
+			data := stream.Data(ctx)
+
+			for i := 0; ; i++ {
+				if i == len(test) {
+					stream.Close()
+				}
+
+				select {
+				case <-ctx.Done():
+					t.Fatalf("unexpected error: %v", ctx.Err())
+				case bte, ok := <-data:
+					if !ok {
+						return
+					}
+
+					if test[i] != bte {
+						t.Fatalf(
+							"byte mismatch at index %v; expected %v; got %v",
+							i,
+							test[i],
+							bte,
+						)
+					}
+				}
+			}
+		})
+	}
+}
+
 func Test_NewWriteStreams(t *testing.T) {
 	testdata := map[string]struct {
 		writers  []io.Writer
@@ -139,6 +228,84 @@ func Test_NewWriteStreams(t *testing.T) {
 
 			if len(streams) != test.expected {
 				t.Fatalf("expected %v streams, got %v", test.expected, len(streams))
+			}
+		})
+	}
+}
+
+func Test_WriteStream(t *testing.T) {
+	data, err := setOfRandBytes(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for sum, test := range data {
+		t.Run(sum, func(t *testing.T) {
+			t.Logf("data length: %v bytes", len(test))
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			stream := NewStream(ctx, 0)
+
+			testdata := make([]byte, len(test))
+			copy(testdata, test)
+
+			go func(testdata []byte) {
+				defer func() {
+					if r := recover(); r != nil {
+						t.Errorf("unexpected error: %v", r)
+					}
+				}()
+
+				wstream := NewWriteStream(
+					ctx,
+					stream,
+					0,
+				)
+
+				defer func() {
+					err := wstream.Close()
+					if err != nil {
+						t.Errorf("unexpected error: %v", err)
+					}
+				}()
+
+				in := wstream.Data(ctx)
+
+				for i := 0; i < len(testdata); i++ {
+					select {
+					case <-ctx.Done():
+						return
+					case in <- testdata[i]:
+					}
+				}
+			}(testdata)
+
+			data := stream.Out(ctx)
+
+			for i := 0; ; i++ {
+				if i == len(test) {
+					stream.Close()
+				}
+
+				select {
+				case <-ctx.Done():
+					t.Fatalf("unexpected error: %v", ctx.Err())
+				case bte, ok := <-data:
+					if !ok {
+						return
+					}
+
+					if test[i] != bte {
+						t.Fatalf(
+							"byte mismatch at index %v; expected %v; got %v",
+							i,
+							test[i],
+							bte,
+						)
+					}
+				}
 			}
 		})
 	}

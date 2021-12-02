@@ -179,13 +179,6 @@ func Test_Multplexer_Writer(t *testing.T) {
 				t.Errorf("unexpected error: %v", err)
 			}
 
-			defer func() {
-				err := m.Close()
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-			}()
-
 			testdata := make([]byte, len(test))
 			copy(testdata, test)
 
@@ -212,7 +205,11 @@ func Test_Multplexer_Writer(t *testing.T) {
 			data := stream.Out(ctx)
 
 		readloop:
-			for i := 0; i < len(test); i++ {
+			for i := 0; ; i++ {
+				if i == len(test) {
+					m.Close()
+				}
+
 				select {
 				case <-ctx.Done():
 					t.Fatalf("unexpected error: %v", ctx.Err())
