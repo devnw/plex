@@ -311,7 +311,7 @@ func Test_WriteStream(t *testing.T) {
 	}
 }
 
-func Test_Streams_Read(t *testing.T) {
+func Test_Stream_Read(t *testing.T) {
 	data, err := setOfRandBytes(100)
 	if err != nil {
 		t.Fatal(err)
@@ -349,7 +349,93 @@ func Test_Streams_Read(t *testing.T) {
 	}
 }
 
-func Benchmark_Streams_Read(b *testing.B) {
+func Test_Stream_Reader(t *testing.T) {
+	data, err := setOfRandBytes(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range data {
+		t.Logf("data length: %v bytes", len(test))
+
+		t.Run(fmt.Sprintf("%x", sha1.Sum(test)), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			rws := NewStream(ctx, 4)
+			defer func() {
+				err = rws.Close()
+				if err != nil {
+					t.Errorf("stream close error: %v", err)
+				}
+			}()
+
+			testdata := make([]byte, len(test))
+			copy(testdata, test)
+
+			go func(rws Stream, testdata []byte) {
+				defer func() {
+					_ = recover()
+				}()
+
+				st, ok := rws.(*rwStream)
+				if !ok {
+					t.Errorf("expected rwStream, got %T", rws)
+				}
+
+				for _, b := range testdata {
+					select {
+					case <-ctx.Done():
+						return
+					case st.data <- b:
+					}
+				}
+
+				close(st.data)
+			}(rws, testdata)
+
+			buff := make([]byte, 10)
+			total := 0
+			n := 0
+			for {
+				n, err = rws.Read(buff)
+				if err != nil {
+					break
+				}
+
+				for i := 0; i < n; i++ {
+					if buff[i] != test[total+i] {
+						t.Fatalf("expected %v, got %v", test[total+i], buff[i])
+					}
+				}
+
+				total += n
+			}
+
+			if err != io.EOF {
+				t.Fatalf("expected EOF, got %v", err)
+			}
+		})
+	}
+}
+
+func Test_Stream_Read_ctxcan(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	rws := NewStream(ctx, 0)
+
+	n, err := rws.Read([]byte("test"))
+	if n > 0 {
+		t.Fatalf("expected 0 bytes written, got %v", n)
+	}
+
+	if err != ctx.Err() {
+		t.Fatalf("expected error %v, got %v", ctx.Err(), err)
+	}
+}
+
+func Benchmark_Stream_Read(b *testing.B) {
 	data, err := randBytes(1)
 	if err != nil {
 		b.Fatal(err)
@@ -392,7 +478,7 @@ func Benchmark_Streams_Read(b *testing.B) {
 	}
 }
 
-func Test_Streams_Write(t *testing.T) {
+func Test_Stream_Out(t *testing.T) {
 	data, err := setOfRandBytes(100)
 	if err != nil {
 		t.Fatal(err)
@@ -455,6 +541,89 @@ func Test_Streams_Write(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func Test_Stream_Write(t *testing.T) {
+	data, err := setOfRandBytes(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range data {
+		t.Logf("data length: %v bytes", len(test))
+
+		t.Run(fmt.Sprintf("%x", sha1.Sum(test)), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			rws := NewStream(ctx, 4)
+			defer func() {
+				err := rws.Close()
+				if err != nil {
+					t.Errorf("stream close error: %v", err)
+				}
+			}()
+
+			testdata := make([]byte, len(test))
+			copy(testdata, test)
+
+			go func(testdata []byte) {
+				// Ignoring this is fine because if it panic's due to an
+				// issue with a closed channel that is correct, if it doesn't
+				// the test will fail because there won't be enough bytes
+				// to satisfy the read.
+				defer func() {
+					_ = recover()
+				}()
+
+				total := 0
+				for total < len(testdata) {
+					n, err := rws.Write(testdata[total:])
+					if err != nil {
+						t.Errorf("write error: %v", err)
+						return
+					}
+
+					total += n
+				}
+			}(testdata)
+
+			// Data transfer channels
+			read := rws.Out(ctx)
+
+		readloop:
+			for i := 0; i < len(test); i++ {
+				select {
+				case <-ctx.Done():
+					t.Fatalf("context done | %s", ctx.Err())
+				case b, ok := <-read:
+					if !ok {
+						break readloop
+					}
+
+					if b != test[i] {
+						t.Fatalf("expected byte %v, got %v @ index %v", test[i], b, i)
+					}
+				}
+			}
+		})
+	}
+}
+
+func Test_Stream_Write_ctxcan(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	rws := NewStream(ctx, 0)
+
+	n, err := rws.Write([]byte("test"))
+	if n > 0 {
+		t.Fatalf("expected 0 bytes written, got %v", n)
+	}
+
+	if err != ctx.Err() {
+		t.Fatalf("expected error %v, got %v", ctx.Err(), err)
 	}
 }
 

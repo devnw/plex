@@ -335,15 +335,6 @@ func (rws *rwStream) Close() error {
 		_ = recover() // TODO: handle in the future?
 	}()
 
-	defer func() {
-		// drain the data channel
-		for len(rws.data) > 0 {
-			<-rws.data
-		}
-
-		close(rws.data)
-	}()
-
 	rws.cancel()
 	<-rws.ctx.Done()
 
@@ -471,8 +462,6 @@ func (w *wStream) Close() (err error) {
 	defer func() {
 		_ = recover() // TODO: handle in the future?
 	}()
-
-	defer close(w.w)
 
 	w.cancel()
 	<-w.ctx.Done()
