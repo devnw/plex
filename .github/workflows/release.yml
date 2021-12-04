@@ -8,15 +8,40 @@ on:
 jobs:
   build:
     name: "Build & Unit Tests"
-    runs-on: "ubuntu-latest"
+    strategy:
+      matrix:
+        platform: [ubuntu-latest, macos-latest, windows-latest]
+      fail-fast: true
+    runs-on: ${{ matrix.platform }}
     steps:
-      - uses: ./.github/workflows/build.yml@main
+      - name: Checkout code
+        uses: actions/checkout@v2.4.0
+      - name: Install Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.17.x
+      - name: Build
+        run: go build ./...
+      - name: Test
+        run: go test -v -race ./...
   codeql:
     name: "CodeQL Check"
-    runs-on: "ubuntu-latest"
     needs: [build]
+    strategy:
+      matrix:
+        go-version: [1.17.x]
+        platform: [ubuntu-latest, macos-latest, windows-latest]
+      fail-fast: true
+    runs-on: ${{ matrix.platform }}
     steps:
-      - uses: ./.github/workflows/codeql.yml@main
+      - name: Checkout code
+        uses: actions/checkout@v2.4.0
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v1
+        with:
+          languages: go
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v1
   release:
     needs: [build, codeql]
     name: "Tagged Release"
