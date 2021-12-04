@@ -8,9 +8,7 @@ jobs:
     name: "Lint"
     runs-on: "ubuntu-latest"
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v2.4.0
-      - uses: .github/workflows/golangci-lint.yml
+      - uses: ./.github/workflows/golangci-lint@main
   build:
     name: "Build"
     needs: [lint]
