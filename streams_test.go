@@ -272,7 +272,6 @@ func Test_WriteStream(t *testing.T) {
 				}()
 
 				in := wstream.Data(ctx)
-				defer close(in)
 
 				for i := 0; i < len(testdata); i++ {
 					select {
@@ -414,7 +413,10 @@ func Test_Streams_Write(t *testing.T) {
 				}
 			}()
 
-			go func(rws Stream) {
+			testdata := make([]byte, len(test))
+			copy(testdata, test)
+
+			go func(rws Stream, testdata []byte) {
 				// Ignoring this is fine because if it panic's due to an
 				// issue with a closed channel that is correct, if it doesn't
 				// the test will fail because there won't be enough bytes
@@ -424,16 +426,15 @@ func Test_Streams_Write(t *testing.T) {
 				}()
 
 				write := rws.In(ctx)
-				defer close(write)
 
-				for _, b := range test {
+				for _, b := range testdata {
 					select {
 					case <-ctx.Done():
 						return
 					case write <- b:
 					}
 				}
-			}(rws)
+			}(rws, testdata)
 
 			// Data transfer channels
 			read := rws.Out(ctx)
@@ -517,7 +518,10 @@ func Test_Write(t *testing.T) {
 			// Create a concurrent safe writer
 			stream := NewStream(ctx, 0)
 
-			go func() {
+			testdata := make([]byte, len(test))
+			copy(testdata, test)
+
+			go func(testdata []byte) {
 				// Ignoring this is fine because if it panic's due to an
 				// issue with a closed channel that is correct, if it doesn't
 				// the test will fail because there won't be enough bytes
@@ -529,14 +533,14 @@ func Test_Write(t *testing.T) {
 				wchan := Write(ctx, stream, 0)
 				defer close(wchan)
 
-				for _, b := range test {
+				for _, b := range testdata {
 					select {
 					case <-ctx.Done():
 						t.Error("context done")
 					case wchan <- b:
 					}
 				}
-			}()
+			}(testdata)
 
 			out := stream.Out(ctx)
 		readloop:
@@ -601,7 +605,10 @@ func Test_Read(t *testing.T) {
 			// Create a concurrent safe writer
 			stream := NewStream(ctx, 0)
 
-			go func() {
+			testdata := make([]byte, len(test))
+			copy(testdata, test)
+
+			go func(testdata []byte) {
 				defer func() {
 					err := stream.Close()
 					if err != nil {
@@ -611,14 +618,14 @@ func Test_Read(t *testing.T) {
 				}()
 				in := stream.In(ctx)
 
-				for _, b := range test {
+				for _, b := range testdata {
 					select {
 					case <-ctx.Done():
 						t.Error("context done")
 					case in <- b:
 					}
 				}
-			}()
+			}(testdata)
 
 			out := Read(ctx, stream, 0)
 
