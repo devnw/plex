@@ -57,8 +57,21 @@ func (m *multiplexer) Close() (err error) {
 		err = recoverErr(err, recover())
 	}()
 
-	defer close(m.readers)
-	defer close(m.writers)
+	defer func() {
+		for len(m.readers) > 0 {
+			<-m.readers
+		}
+
+		close(m.readers)
+	}()
+
+	defer func() {
+		for len(m.writers) > 0 {
+			<-m.writers
+		}
+
+		close(m.writers)
+	}()
 
 	m.cancel()
 	<-m.ctx.Done()
