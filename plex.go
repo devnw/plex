@@ -124,14 +124,12 @@ func (m *multiplexer) Reader(
 			cleanup: func() error {
 				select {
 				case <-m.ctx.Done():
-				case <-rctx.Done():
+					return m.ctx.Err()
 				default:
 					// This is already a read stream so
 					// no need to update the buffer
-					return m.queue(ctx, -1, r)
+					return m.queue(ctx, r)
 				}
-
-				return nil
 			},
 		}, nil
 	}
@@ -180,14 +178,12 @@ func (m *multiplexer) Writer(
 			cleanup: func() error {
 				select {
 				case <-m.ctx.Done():
-				case <-wctx.Done():
+					return m.ctx.Err()
 				default:
 					// This is already a read stream so
 					// no need to update the buffer
-					return m.queue(ctx, -1, w)
+					return m.queue(ctx, w)
 				}
-
-				return nil
 			},
 		}, nil
 	}

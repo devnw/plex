@@ -335,8 +335,6 @@ func (rws *rwStream) Close() error {
 		_ = recover() // TODO: handle in the future?
 	}()
 
-	defer close(rws.data)
-
 	rws.cancel()
 	<-rws.ctx.Done()
 

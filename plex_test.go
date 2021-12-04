@@ -478,6 +478,188 @@ func Test_multiplexer_New_Reader_canceled(t *testing.T) {
 	}
 }
 
+func Test_multiplexer_Reader_timeout(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	m := &multiplexer{ctx: ctx}
+
+	timeout := time.Millisecond
+	_, err := m.Reader(ctx, &timeout)
+	if err != ErrTimeout {
+		t.Errorf("Expected ErrTimeout; got %v", err)
+	}
+}
+
+func Test_multiplexer_Reader_closed_readers(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	readers := make(chan ReadStream)
+
+	m := &multiplexer{
+		ctx:     ctx,
+		readers: readers,
+	}
+
+	close(readers)
+
+	_, err := m.Reader(ctx, nil)
+	if err != ErrClosed {
+		t.Errorf("Expected ErrClosed; got %v", err)
+	}
+}
+
+func Test_multiplexer_Reader_cleanup(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	m, err := New(
+		ctx,
+		WithReaders(bytes.NewBuffer([]byte("test"))),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := m.Reader(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	multiplex, ok := m.(*multiplexer)
+	if !ok {
+		t.Fatal("Expected multiplexer")
+	}
+
+	if len(multiplex.readers) != 0 {
+		t.Errorf("Expected 0 readers; got %v", len(multiplex.readers))
+	}
+
+	r.Close()
+
+	if len(multiplex.readers) != 1 {
+		t.Errorf("Expected 1 readers; got %v", len(multiplex.readers))
+	}
+}
+
+func Test_multiplexer_Reader_cleanup_ctxcan(t *testing.T) {
+	for i := 0; i < 100; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+
+		m, err := New(
+			ctx,
+			WithReaders(bytes.NewBuffer([]byte("test"))),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		r, err := m.Reader(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		cancel()
+		err = r.Close()
+		if err == context.Canceled {
+			return
+		}
+	}
+
+	t.Fatal("Expected context.Canceled")
+}
+
+func Test_multiplexer_Writer_timeout(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	m := &multiplexer{ctx: ctx}
+
+	timeout := time.Millisecond
+	_, err := m.Writer(ctx, &timeout)
+	if err != ErrTimeout {
+		t.Errorf("Expected ErrTimeout; got %v", err)
+	}
+}
+
+func Test_multiplexer_Writer_closed_writers(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	m := &multiplexer{
+		ctx:     ctx,
+		writers: make(chan WriteStream),
+	}
+
+	close(m.writers)
+
+	_, err := m.Writer(ctx, nil)
+	if err != ErrClosed {
+		t.Errorf("Expected ErrClosed; got %v", err)
+	}
+}
+
+func Test_multiplexer_Writer_cleanup(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	m, err := New(
+		ctx,
+		WithWriters(bytes.NewBuffer([]byte("test"))),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w, err := m.Writer(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	multiplex, ok := m.(*multiplexer)
+	if !ok {
+		t.Fatal("Expected multiplexer")
+	}
+
+	if len(multiplex.writers) != 0 {
+		t.Errorf("Expected 0 writers; got %v", len(multiplex.writers))
+	}
+
+	w.Close()
+
+	if len(multiplex.writers) != 1 {
+		t.Errorf("Expected 1 writers; got %v", len(multiplex.writers))
+	}
+}
+
+func Test_multiplexer_Writer_cleanup_ctxcan(t *testing.T) {
+	for i := 0; i < 100; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+
+		m, err := New(
+			ctx,
+			WithWriters(bytes.NewBuffer([]byte("test"))),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		w, err := m.Writer(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		cancel()
+		err = w.Close()
+		if err == context.Canceled {
+			return
+		}
+	}
+
+	t.Fatal("Expected context.Canceled")
+}
+
 func Test_multiplexer_New_ReaderWriter_canceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
