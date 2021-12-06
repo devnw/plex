@@ -111,14 +111,9 @@ func (m *multiplexer) Reader(
 			return nil, ErrClosed
 		}
 
-		rctx, rcancel := context.WithCancel(ctx)
-
 		return &reader{
-			ctx:    rctx,
-			cancel: rcancel,
-			r:      r,
-			buffer: m.readBufferSize,
-			cleanup: func() error {
+			r,
+			func() error {
 				select {
 				case <-m.ctx.Done():
 					return m.ctx.Err()
@@ -165,14 +160,9 @@ func (m *multiplexer) Writer(
 			return nil, ErrClosed
 		}
 
-		wctx, wcancel := context.WithCancel(ctx)
-
 		return &writer{
-			ctx:    wctx,
-			cancel: wcancel,
-			w:      w,
-			buffer: m.writeBufferSize,
-			cleanup: func() error {
+			w,
+			func() error {
 				select {
 				case <-m.ctx.Done():
 					return m.ctx.Err()

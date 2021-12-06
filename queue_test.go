@@ -61,6 +61,14 @@ func Test_multiplexer_queue_canceled(t *testing.T) {
 	}
 }
 
+type testreader struct {
+	io.Reader
+}
+
+type testwriter struct {
+	io.Writer
+}
+
 // nolint:funlen
 func Test_multiplexer_queue(t *testing.T) {
 	testdata := map[string]struct {
@@ -244,10 +252,7 @@ func Test_multiplexer_queue(t *testing.T) {
 		},
 		"valid single writer": {
 			inputs: []interface{}{
-				&writer{
-					ctx:    context.Background(),
-					cancel: func() {},
-				},
+				&testwriter{},
 			},
 			writercount: 1,
 			err:         nil,
@@ -256,10 +261,7 @@ func Test_multiplexer_queue(t *testing.T) {
 		"valid writer slice; single writer": {
 			inputs: []interface{}{
 				[]io.Writer{
-					&writer{
-						ctx:    context.Background(),
-						cancel: func() {},
-					},
+					&testwriter{},
 				}},
 			writercount: 1,
 			err:         nil,
@@ -268,26 +270,11 @@ func Test_multiplexer_queue(t *testing.T) {
 		"valid writer slice; multiple writer": {
 			inputs: []interface{}{
 				[]io.Writer{
-					&writer{
-						ctx:    context.Background(),
-						cancel: func() {},
-					},
-					&writer{
-						ctx:    context.Background(),
-						cancel: func() {},
-					},
-					&writer{
-						ctx:    context.Background(),
-						cancel: func() {},
-					},
-					&writer{
-						ctx:    context.Background(),
-						cancel: func() {},
-					},
-					&writer{
-						ctx:    context.Background(),
-						cancel: func() {},
-					},
+					&testwriter{},
+					&testwriter{},
+					&testwriter{},
+					&testwriter{},
+					&testwriter{},
 				}},
 			writercount: 5,
 			err:         nil,
@@ -296,10 +283,7 @@ func Test_multiplexer_queue(t *testing.T) {
 		"invalid writer slice; single writer, nil second": {
 			inputs: []interface{}{
 				[]io.Writer{
-					&writer{
-						ctx:    context.Background(),
-						cancel: func() {},
-					},
+					&testwriter{},
 					nil,
 				}},
 			writercount: 1,
@@ -309,15 +293,9 @@ func Test_multiplexer_queue(t *testing.T) {
 		"invalid writer slice; multi writer, nil interleaved": {
 			inputs: []interface{}{
 				[]io.Writer{
-					&writer{
-						ctx:    context.Background(),
-						cancel: func() {},
-					},
+					&testwriter{},
 					nil,
-					&writer{
-						ctx:    context.Background(),
-						cancel: func() {},
-					},
+					&testwriter{},
 				}},
 			writercount: 1,
 			err:         ErrNil,
@@ -325,10 +303,7 @@ func Test_multiplexer_queue(t *testing.T) {
 		},
 		"valid single reader": {
 			inputs: []interface{}{
-				&reader{
-					ctx:    context.Background(),
-					cancel: func() {},
-				},
+				&testreader{},
 			},
 			readercount: 1,
 			err:         nil,
@@ -337,10 +312,7 @@ func Test_multiplexer_queue(t *testing.T) {
 		"valid reader slice; single reader": {
 			inputs: []interface{}{
 				[]io.Reader{
-					&reader{
-						ctx:    context.Background(),
-						cancel: func() {},
-					},
+					&testreader{},
 				}},
 			readercount: 1,
 			err:         nil,
@@ -349,26 +321,11 @@ func Test_multiplexer_queue(t *testing.T) {
 		"valid reader slice; multiple reader": {
 			inputs: []interface{}{
 				[]io.Reader{
-					&reader{
-						ctx:    context.Background(),
-						cancel: func() {},
-					},
-					&reader{
-						ctx:    context.Background(),
-						cancel: func() {},
-					},
-					&reader{
-						ctx:    context.Background(),
-						cancel: func() {},
-					},
-					&reader{
-						ctx:    context.Background(),
-						cancel: func() {},
-					},
-					&reader{
-						ctx:    context.Background(),
-						cancel: func() {},
-					},
+					&testreader{},
+					&testreader{},
+					&testreader{},
+					&testreader{},
+					&testreader{},
 				}},
 			readercount: 5,
 			err:         nil,
@@ -377,10 +334,7 @@ func Test_multiplexer_queue(t *testing.T) {
 		"invalid reader slice; single reader, nil second": {
 			inputs: []interface{}{
 				[]io.Reader{
-					&reader{
-						ctx:    context.Background(),
-						cancel: func() {},
-					},
+					&testreader{},
 					nil,
 				}},
 			readercount: 1,
@@ -390,15 +344,9 @@ func Test_multiplexer_queue(t *testing.T) {
 		"invalid reader slice; multi reader, nil interleaved": {
 			inputs: []interface{}{
 				[]io.Reader{
-					&reader{
-						ctx:    context.Background(),
-						cancel: func() {},
-					},
+					&testreader{},
 					nil,
-					&reader{
-						ctx:    context.Background(),
-						cancel: func() {},
-					},
+					&testreader{},
 				}},
 			readercount: 1,
 			err:         ErrNil,

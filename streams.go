@@ -148,17 +148,36 @@ func Write(ctx context.Context, w io.Writer, buffer int) chan<- byte {
 			}
 		}()
 
+		if buffer < 1 {
+			buffer = 1
+		}
+
+		buff := make([]byte, buffer)
+		index := 0
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case b, ok := <-out:
-				if !ok {
-					return
+				if ok {
+					buff[index] = b
+					index++
 				}
 
-				_, err := w.Write([]byte{b})
-				if err != nil {
+				if index == buffer || !ok {
+					out := make([]byte, len(buff[:index]))
+					copy(out, buff[:index])
+
+					_, err := w.Write(out)
+					if err != nil {
+						return
+					}
+
+					buff = make([]byte, buffer)
+					index = 0
+				}
+
+				if !ok {
 					return
 				}
 			}
