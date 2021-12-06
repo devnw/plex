@@ -83,13 +83,25 @@ func (m *multiplexer) Add(
 // returned reader. A closed reader is returned to the multiplexer's pool of
 // available readers for reuse. If there is an internal error in a reader
 // within the multiplexer's pool of available readers, the multiplexer will
-// eliminate the reader from the pool and attempt to retrieve a new one if
-// possible.
-// nolint:dupl
+// eliminate the reader from the pool.
 func (m *multiplexer) Reader(
 	ctx context.Context,
 	timeout *time.Duration,
 ) (io.ReadCloser, error) {
+	return m.ReadStream(ctx, timeout)
+}
+
+// ReadStream returns one of the multiplexed streams for reading. Reading
+// should occur in completion by the caller (for the use case) before closing
+// the returned ReadStream. A closed ReadStream is returned to the
+// multiplexer's pool of available ReadStreams for reuse. If there is an
+// internal error in a ReadStream within the multiplexer's pool of available
+// readers, the multiplexer will eliminate the reader from the pool.
+// nolint:dupl
+func (m *multiplexer) ReadStream(
+	ctx context.Context,
+	timeout *time.Duration,
+) (ReadStream, error) {
 	ctx = merge(m.ctx, ctx)
 	var tchan <-chan time.Time
 
@@ -132,13 +144,25 @@ func (m *multiplexer) Reader(
 // returned writer. A closed writer is returned to the multiplexer's pool of
 // available writers for reuse. If there is an internal error in a writer
 // within the multiplexer's pool of available writers, the multiplexer will
-// eliminate the writer from the pool and attempt to retrieve a new one if
-// possible.
-// nolint:dupl
+// eliminate the writer from the pool.
 func (m *multiplexer) Writer(
 	ctx context.Context,
 	timeout *time.Duration,
 ) (io.WriteCloser, error) {
+	return m.WriteStream(ctx, timeout)
+}
+
+// WriteStream returns one of the multiplexed streams for writing. Writing
+// should occur in completion by the caller (for the use case) before closing
+// the returned WriteStream. A closed WriteStream is returned to the
+// multiplexer's pool of available WriteStreams for reuse. If there is an
+// internal error in a WriteStream within the multiplexer's pool of available
+// writers, the multiplexer will eliminate the writer from the pool.
+// nolint:dupl
+func (m *multiplexer) WriteStream(
+	ctx context.Context,
+	timeout *time.Duration,
+) (WriteStream, error) {
 	ctx = merge(m.ctx, ctx)
 	var tchan <-chan time.Time
 

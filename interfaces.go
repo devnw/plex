@@ -32,6 +32,7 @@ type Reader interface {
 	// this would allow for external libraries to handle scaling the multiplexer
 	// using select contention instead of requiring the plex library to handle it.
 	Reader(context.Context, *time.Duration) (io.ReadCloser, error)
+	ReadStream(context.Context, *time.Duration) (ReadStream, error)
 }
 
 // Writer defines an interface for requesting an io.WriteCloser from the
@@ -46,6 +47,7 @@ type Writer interface {
 	// this would allow for external libraries to handle scaling the multiplexer
 	// using select contention instead of requiring the plex library to handle it.
 	Writer(context.Context, *time.Duration) (io.WriteCloser, error)
+	WriteStream(context.Context, *time.Duration) (WriteStream, error)
 }
 
 // ReadWriter defines an interface for requesting either an io.ReadCloser, or
