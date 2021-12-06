@@ -232,6 +232,219 @@ func Test_Multplexer_Writer(t *testing.T) {
 	}
 }
 
+func Test_Plex_AllReaders_Busy_RequestReader(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	m, err := New(
+		ctx,
+		WithReaders(
+			bytes.NewBuffer([]byte("test1")),
+			bytes.NewBuffer([]byte("test2")),
+			bytes.NewBuffer([]byte("test3")),
+		),
+	)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Test 1
+	test1, err := m.Reader(ctx, nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Test 2
+	test2, err := m.Reader(ctx, nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Test 3
+	test3, err := m.Reader(ctx, nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	timeout := time.Millisecond * 100
+
+	// Test 4 (should timeout)
+	_, err = m.Reader(ctx, &timeout)
+	if err != ErrTimeout {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Free up the reader
+	test1.Close()
+
+	// Test 5
+	test5, err := m.Reader(ctx, nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	buff := make([]byte, 5)
+
+	n, err := test5.Read(buff)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	if n != 5 || string(buff[:n]) != "test1" {
+		t.Fatalf("unexpected data: %v", string(buff[:n]))
+	}
+
+	// Free up the reader
+	test2.Close()
+
+	// Test 6
+	test6, err := m.Reader(ctx, nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	n, err = test6.Read(buff)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	if n != 5 || string(buff[:n]) != "test2" {
+		t.Fatalf("unexpected data: %v", string(buff[:n]))
+	}
+
+	// Free up the reader
+	test3.Close()
+
+	// Test 7
+	test7, err := m.Reader(ctx, nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	n, err = test7.Read(buff)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	if n != 5 || string(buff[:n]) != "test3" {
+		t.Fatalf("unexpected data: %v", string(buff[:n]))
+	}
+}
+
+// nolint:funlen
+func Test_Plex_AllReaders_Busy_RequestReader_Parallel(t *testing.T) {
+	poolsizes := []int{
+		10,
+		20,
+		50,
+		100,
+		500,
+		1000,
+	}
+
+	for _, poolsize := range poolsizes {
+		t.Run(fmt.Sprintf("parallel_poolsize_%v", poolsize), func(t *testing.T) {
+			sums := make(map[string]bool)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			sets, err := setOfRandBytes(poolsize)
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+
+			// Setup the data harness
+			readers := make([]io.Reader, len(sets))
+			for sum, data := range sets {
+				sums[sum] = false
+
+				readers = append(readers, bytes.NewBuffer(data))
+			}
+
+			m, err := New(
+				ctx,
+				WithReaders(readers...),
+			)
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+
+			start := make(chan struct{})
+			sumchan := make(chan string, len(sums))
+
+			for i := 0; i < poolsize; i++ {
+				go func(ctx context.Context, m Multiplexer, sumchan chan<- string) {
+					<-start
+
+					reader, err := m.Reader(ctx, nil)
+					if err != nil {
+						t.Errorf("unexpected error: %v", err)
+					}
+
+					msg := make([]byte, 0)
+
+					n := 0
+					buff := make([]byte, 5)
+
+					for err == nil {
+						n, err = reader.Read(buff)
+
+						msg = append(msg, buff[:n]...)
+
+						if err != nil {
+							break
+						}
+					}
+
+					if err != io.EOF {
+						t.Errorf("unexpected error: %v", err)
+					}
+
+					select {
+					case <-ctx.Done():
+						return
+					case sumchan <- fmt.Sprintf("%x", sha1.Sum(msg)):
+					}
+				}(ctx, m, sumchan)
+			}
+
+			close(start)
+
+			for i := 0; i < len(sums); i++ {
+				select {
+				case <-ctx.Done():
+					t.Fatalf("unexpected error: %v", ctx.Err())
+					return
+				case sum, ok := <-sumchan:
+					if !ok {
+						t.Fatal("unexpected error: channel closed")
+						return
+					}
+
+					if val, ok := sums[sum]; !ok || val {
+						if val {
+							t.Fatalf("unexpected duplicate sum: %v", sum)
+						}
+
+						t.Fatalf("unexpected sum: %v", sum)
+						return
+					}
+
+					sums[sum] = true
+				}
+			}
+
+			for k, v := range sums {
+				if !v {
+					t.Fatalf("expected missing sum: %v", k)
+					return
+				}
+			}
+		})
+	}
+}
+
 // func Test_Out(t *testing.T) {
 // 	testdata := map[string]struct {
 // 		rwc      *rwc
