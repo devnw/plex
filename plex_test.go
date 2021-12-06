@@ -331,25 +331,92 @@ func Test_Plex_AllReaders_Busy_RequestReader(t *testing.T) {
 	}
 }
 
-// nolint:funlen
-func Test_Plex_AllReaders_Busy_RequestReader_Parallel(t *testing.T) {
-	poolsizes := []int{
-		10,
-		20,
-		50,
-		100,
-		500,
-		1000,
+func poolReadMethod(
+	ctx context.Context,
+	t *testing.T,
+	start <-chan struct{},
+	m Multiplexer,
+	sumchan chan<- string,
+) {
+	<-start
+
+	reader, err := m.Reader(ctx, nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
 	}
 
-	for _, poolsize := range poolsizes {
-		t.Run(fmt.Sprintf("parallel_poolsize_%v", poolsize), func(t *testing.T) {
+	msg := make([]byte, 0)
+
+	n := 0
+	buff := make([]byte, 5)
+
+	for err == nil {
+		n, err = reader.Read(buff)
+
+		msg = append(msg, buff[:n]...)
+
+		if err != nil {
+			break
+		}
+	}
+
+	if err != io.EOF {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	select {
+	case <-ctx.Done():
+		return
+	case sumchan <- fmt.Sprintf("%x", sha1.Sum(msg)):
+	}
+}
+
+// nolint:funlen
+func Test_Plex_AllReaders_Busy_RequestReader_Parallel(t *testing.T) {
+	testdata := []struct {
+		poolsize   int
+		readMethod func(
+			ctx context.Context,
+			t *testing.T,
+			start <-chan struct{},
+			m Multiplexer,
+			sumchan chan<- string,
+		)
+	}{
+		{
+			10,
+			poolReadMethod,
+		},
+		{
+			20,
+			poolReadMethod,
+		},
+		{
+			50,
+			poolReadMethod,
+		},
+		{
+			100,
+			poolReadMethod,
+		},
+		{
+			500,
+			poolReadMethod,
+		},
+		{
+			1000,
+			poolReadMethod,
+		},
+	}
+
+	for _, test := range testdata {
+		t.Run(fmt.Sprintf("parallel_poolsize_%v", test.poolsize), func(t *testing.T) {
 			sums := make(map[string]bool)
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			sets, err := setOfRandBytes(poolsize)
+			sets, err := setOfRandBytes(test.poolsize)
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
@@ -373,40 +440,8 @@ func Test_Plex_AllReaders_Busy_RequestReader_Parallel(t *testing.T) {
 			start := make(chan struct{})
 			sumchan := make(chan string, len(sums))
 
-			for i := 0; i < poolsize; i++ {
-				go func(ctx context.Context, m Multiplexer, sumchan chan<- string) {
-					<-start
-
-					reader, err := m.Reader(ctx, nil)
-					if err != nil {
-						t.Errorf("unexpected error: %v", err)
-					}
-
-					msg := make([]byte, 0)
-
-					n := 0
-					buff := make([]byte, 5)
-
-					for err == nil {
-						n, err = reader.Read(buff)
-
-						msg = append(msg, buff[:n]...)
-
-						if err != nil {
-							break
-						}
-					}
-
-					if err != io.EOF {
-						t.Errorf("unexpected error: %v", err)
-					}
-
-					select {
-					case <-ctx.Done():
-						return
-					case sumchan <- fmt.Sprintf("%x", sha1.Sum(msg)):
-					}
-				}(ctx, m, sumchan)
+			for i := 0; i < test.poolsize; i++ {
+				go poolReadMethod(ctx, t, start, m, sumchan)
 			}
 
 			close(start)
@@ -438,7 +473,6 @@ func Test_Plex_AllReaders_Busy_RequestReader_Parallel(t *testing.T) {
 			for k, v := range sums {
 				if !v {
 					t.Fatalf("expected missing sum: %v", k)
-					return
 				}
 			}
 		})
