@@ -26,13 +26,10 @@ type unexported interface {
 type Reader interface {
 	unexported
 
-	Adder
-
 	// TODO: Should this be updated to return a <-chan io.ReadCloser instead?
 	// this would allow for external libraries to handle scaling the multiplexer
 	// using select contention instead of requiring the plex library to handle it.
-	Reader(context.Context, *time.Duration) (io.ReadCloser, error)
-	ReadStream(context.Context, *time.Duration) (ReadStream, error)
+	Reader(context.Context, *time.Duration) (ReadStream, error)
 }
 
 // Writer defines an interface for requesting an io.WriteCloser from the
@@ -41,13 +38,10 @@ type Reader interface {
 type Writer interface {
 	unexported
 
-	Adder
-
 	// TODO: Should this be updated to return a <-chan io.WriteCloser instead?
 	// this would allow for external libraries to handle scaling the multiplexer
 	// using select contention instead of requiring the plex library to handle it.
-	Writer(context.Context, *time.Duration) (io.WriteCloser, error)
-	WriteStream(context.Context, *time.Duration) (WriteStream, error)
+	Writer(context.Context, *time.Duration) (WriteStream, error)
 }
 
 // ReadWriter defines an interface for requesting either an io.ReadCloser, or
@@ -56,7 +50,6 @@ type Writer interface {
 type ReadWriter interface {
 	unexported
 
-	Adder
 	Reader
 	Writer
 }
@@ -69,6 +62,7 @@ type ReadWriter interface {
 type Multiplexer interface {
 	unexported
 
+	Adder
 	Reader
 	Writer
 	ReadWriter
@@ -85,8 +79,7 @@ type Multiplexer interface {
 // implementation. This differs from the API expected by the WriteStream
 // interface.
 type ReadStream interface {
-	io.Reader
-	io.Closer
+	io.ReadCloser
 	Data(context.Context) <-chan byte
 }
 
@@ -99,8 +92,7 @@ type ReadStream interface {
 // NOTE: Closing the channel is the responsibility of the caller. This differs
 // from the API expected by the ReadStream interface.
 type WriteStream interface {
-	io.Writer
-	io.Closer
+	io.WriteCloser
 	Data(context.Context) chan<- byte
 }
 
@@ -110,9 +102,7 @@ type WriteStream interface {
 // methods. The Out method returns a readable channel of bytes and the In method
 // returns a writeable channel of bytes.
 type Stream interface {
-	io.Reader
-	io.Writer
-	io.Closer
+	io.ReadWriteCloser
 	Out(context.Context) <-chan byte
 	In(context.Context) chan<- byte
 }

@@ -78,27 +78,14 @@ func (m *multiplexer) Add(
 	return m.queue(ctx, objs...)
 }
 
-// Reader returns one of the multiplexed readers for reading. Reading should
-// occur in completion (for the use case) by the caller before closing the
-// returned reader. A closed reader is returned to the multiplexer's pool of
-// available readers for reuse. If there is an internal error in a reader
-// within the multiplexer's pool of available readers, the multiplexer will
-// eliminate the reader from the pool.
-func (m *multiplexer) Reader(
-	ctx context.Context,
-	timeout *time.Duration,
-) (io.ReadCloser, error) {
-	return m.ReadStream(ctx, timeout)
-}
-
-// ReadStream returns one of the multiplexed streams for reading. Reading
+// Reader returns one of the multiplexed streams for reading. Reading
 // should occur in completion by the caller (for the use case) before closing
 // the returned ReadStream. A closed ReadStream is returned to the
 // multiplexer's pool of available ReadStreams for reuse. If there is an
 // internal error in a ReadStream within the multiplexer's pool of available
 // readers, the multiplexer will eliminate the reader from the pool.
 // nolint:dupl
-func (m *multiplexer) ReadStream(
+func (m *multiplexer) Reader(
 	ctx context.Context,
 	timeout *time.Duration,
 ) (ReadStream, error) {
@@ -139,27 +126,14 @@ func (m *multiplexer) ReadStream(
 	}
 }
 
-// Writer returns one of the multiplexed writers for writing. Writing should
-// occur in completion by the caller (for the use case) before closing the
-// returned writer. A closed writer is returned to the multiplexer's pool of
-// available writers for reuse. If there is an internal error in a writer
-// within the multiplexer's pool of available writers, the multiplexer will
-// eliminate the writer from the pool.
-func (m *multiplexer) Writer(
-	ctx context.Context,
-	timeout *time.Duration,
-) (io.WriteCloser, error) {
-	return m.WriteStream(ctx, timeout)
-}
-
-// WriteStream returns one of the multiplexed streams for writing. Writing
+// Writer returns one of the multiplexed streams for writing. Writing
 // should occur in completion by the caller (for the use case) before closing
 // the returned WriteStream. A closed WriteStream is returned to the
 // multiplexer's pool of available WriteStreams for reuse. If there is an
 // internal error in a WriteStream within the multiplexer's pool of available
 // writers, the multiplexer will eliminate the writer from the pool.
 // nolint:dupl
-func (m *multiplexer) WriteStream(
+func (m *multiplexer) Writer(
 	ctx context.Context,
 	timeout *time.Duration,
 ) (WriteStream, error) {
