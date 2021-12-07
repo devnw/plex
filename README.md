@@ -12,13 +12,44 @@ readers and writers. Consumers can request a stream from the multiplexer, and
 the multiplexer will return any available stream (if there is one) or
 block/timeout until one becomes available.
 
-Utilizing runtime contention this implementation is able to handle a large
-number of streams, and is able to handle a large number of readers and writers.
+Utilizing runtime contention Plex is able to handle a large number of streams
+for both reading and writing to underlying io.Readers/io.Writers and
+io.ReadWriters.
 
 ## Installation
-
-To import:
 
 ```bash
 go get -u go.atomizer.io/plex@latest
 ```
+
+## Usage
+
+Plex uses the options pattern to allow for users to configure the multiplexer.
+For a full list of options see the [Options](https://pkg.go.dev/go.atomizer.io/plex#Option)
+documentation.
+
+```go
+import "go.atomizer.io/plex"
+
+...
+
+m, err := plex.New(
+    ctx, 
+    plex.WithReader(myreaders...), 
+    plex.WithWriter(mywriters...),
+)
+
+// Access a ReadStream / io.ReadCloser
+r, err := m.Reader(ctx, timeout)
+
+// Access a WriteStream / io.WriteCloser
+w, err := m.Writer(ctx, timeout)
+
+```
+
+Users are responsible for closing any streams they acquire from the multiplexer.
+If a stream is not closed the stream will not be returned to the multiplexer
+pool for reuse.
+
+For further options and documentation visit our documentation page using the
+docs badge at the top of the README.
