@@ -1,355 +1,14 @@
 package plex
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha1"
 	"fmt"
-	"io"
+	"sync"
 	"testing"
-	"time"
 )
 
-func Test_NewReadStreams(t *testing.T) {
-	testdata := map[string]struct {
-		readers  []io.Reader
-		expected int
-	}{
-		"single": {
-			[]io.Reader{bytes.NewBuffer([]byte("test"))},
-			1,
-		},
-		"multiple": {
-			[]io.Reader{
-				bytes.NewBuffer([]byte("test")),
-				bytes.NewBuffer([]byte("test")),
-				bytes.NewBuffer([]byte("test")),
-				bytes.NewBuffer([]byte("test")),
-				bytes.NewBuffer([]byte("test")),
-			},
-			5,
-		},
-		"multiple, nil interleaved": {
-			[]io.Reader{
-				bytes.NewBuffer([]byte("test")),
-				nil,
-				bytes.NewBuffer([]byte("test")),
-				nil,
-				bytes.NewBuffer([]byte("test")),
-			},
-			3,
-		},
-		"single nil": {
-			[]io.Reader{
-				nil,
-			},
-			0,
-		},
-		"only nil": {
-			[]io.Reader{
-				nil,
-				nil,
-				nil,
-			},
-			0,
-		},
-		"empty": {
-			[]io.Reader{},
-			0,
-		},
-	}
-
-	for name, test := range testdata {
-		t.Run(name, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-
-			streams := NewReadStreams(ctx, 0, test.readers...)
-
-			if test.expected > 0 && streams == nil {
-				t.Fatal("expected streams")
-			}
-
-			if len(streams) != test.expected {
-				t.Fatalf("expected %v streams, got %v", test.expected, len(streams))
-			}
-		})
-	}
-}
-
-func Test_ReadStream_Close(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	testdata := []byte("testtesttest")
-
-	stream := NewReadStream(
-		ctx,
-		bytes.NewBuffer(
-			testdata,
-		),
-		0,
-	)
-
-	data := stream.Data(ctx)
-
-	for i := 0; i < len(testdata); i++ {
-		select {
-		case <-ctx.Done():
-			return
-		case bte, ok := <-data:
-			if !ok {
-				return
-			}
-
-			if bte != testdata[i] {
-				t.Fatalf("expected %v, got %v", testdata[i], bte)
-			}
-
-			// Cancel the context
-			if i == 1 {
-				stream.Close()
-			}
-		}
-	}
-
-	t.Fatalf("expected to be closed")
-}
-
-func Test_ReadStream(t *testing.T) {
-	data, err := setOfRandBytes(100)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for sum, test := range data {
-		t.Run(sum, func(t *testing.T) {
-			t.Logf("data length: %v bytes", len(test))
-
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-
-			stream := NewReadStream(
-				ctx,
-				bytes.NewBuffer(
-					test,
-				),
-				0,
-			)
-
-			data := stream.Data(ctx)
-
-			for i := 0; ; i++ {
-				if i == len(test) {
-					stream.Close()
-				}
-
-				select {
-				case <-ctx.Done():
-					t.Fatalf("unexpected error: %v", ctx.Err())
-				case bte, ok := <-data:
-					if !ok {
-						return
-					}
-
-					if test[i] != bte {
-						t.Fatalf(
-							"byte mismatch at index %v; expected %v; got %v",
-							i,
-							test[i],
-							bte,
-						)
-					}
-				}
-			}
-		})
-	}
-}
-
-func Test_NewWriteStreams(t *testing.T) {
-	testdata := map[string]struct {
-		writers  []io.Writer
-		expected int
-	}{
-		"single": {
-			[]io.Writer{bytes.NewBuffer([]byte("test"))},
-			1,
-		},
-		"multiple": {
-			[]io.Writer{
-				bytes.NewBuffer([]byte("test")),
-				bytes.NewBuffer([]byte("test")),
-				bytes.NewBuffer([]byte("test")),
-				bytes.NewBuffer([]byte("test")),
-				bytes.NewBuffer([]byte("test")),
-			},
-			5,
-		},
-		"multiple, nil interleaved": {
-			[]io.Writer{
-				bytes.NewBuffer([]byte("test")),
-				nil,
-				bytes.NewBuffer([]byte("test")),
-				nil,
-				bytes.NewBuffer([]byte("test")),
-			},
-			3,
-		},
-		"single nil": {
-			[]io.Writer{
-				nil,
-			},
-			0,
-		},
-		"only nil": {
-			[]io.Writer{
-				nil,
-				nil,
-				nil,
-			},
-			0,
-		},
-		"empty": {
-			[]io.Writer{},
-			0,
-		},
-	}
-
-	for name, test := range testdata {
-		t.Run(name, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-
-			streams := NewWriteStreams(ctx, 0, test.writers...)
-
-			if test.expected > 0 && streams == nil {
-				t.Fatal("expected streams")
-			}
-
-			if len(streams) != test.expected {
-				t.Fatalf("expected %v streams, got %v", test.expected, len(streams))
-			}
-		})
-	}
-}
-
-func Test_WriteStream(t *testing.T) {
-	data, err := setOfRandBytes(100)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for sum, test := range data {
-		t.Run(sum, func(t *testing.T) {
-			t.Logf("data length: %v bytes", len(test))
-
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-
-			stream := NewStream(ctx, 0)
-
-			testdata := make([]byte, len(test))
-			copy(testdata, test)
-
-			go func(testdata []byte) {
-				defer func() {
-					if r := recover(); r != nil {
-						t.Errorf("unexpected error: %v", r)
-					}
-				}()
-
-				wstream := NewWriteStream(
-					ctx,
-					stream,
-					0,
-				)
-
-				defer func() {
-					err := wstream.Close()
-					if err != nil {
-						t.Errorf("unexpected error: %v", err)
-					}
-				}()
-
-				in := wstream.Data(ctx)
-
-				for i := 0; i < len(testdata); i++ {
-					select {
-					case <-ctx.Done():
-						return
-					case in <- testdata[i]:
-					}
-				}
-			}(testdata)
-
-			data := stream.Out(ctx)
-
-			for i := 0; ; i++ {
-				if i == len(test) {
-					stream.Close()
-				}
-
-				select {
-				case <-ctx.Done():
-					t.Fatalf("unexpected error: %v", ctx.Err())
-				case bte, ok := <-data:
-					if !ok {
-						return
-					}
-
-					if test[i] != bte {
-						t.Fatalf(
-							"byte mismatch at index %v; expected %v; got %v",
-							i,
-							test[i],
-							bte,
-						)
-					}
-				}
-			}
-		})
-	}
-}
-
-func Test_Stream_Read(t *testing.T) {
-	data, err := setOfRandBytes(100)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for _, test := range data {
-		t.Logf("data length: %v bytes", len(test))
-
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		out := Read(ctx, bytes.NewBuffer(test), len(test))
-
-		var i int
-
-	readloop:
-		for ; ; i++ {
-			select {
-			case <-ctx.Done():
-				t.Fatal("context done")
-			case b, ok := <-out:
-				if !ok {
-					break readloop
-				}
-
-				if b != test[i] {
-					t.Fatalf("expected %v, got %v", test[i], b)
-				}
-			}
-		}
-
-		if i != len(test) {
-			t.Fatalf("expected %v, got %v", len(test), i)
-		}
-	}
-}
-
-func Test_Stream_Reader(t *testing.T) {
+func Test_stream_Recv(t *testing.T) {
 	data, err := setOfRandBytes(100)
 	if err != nil {
 		t.Fatal(err)
@@ -362,7 +21,7 @@ func Test_Stream_Reader(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			rws := NewStream(ctx, 4)
+			rws := newStream(ctx)
 			defer func() {
 				err = rws.Close()
 				if err != nil {
@@ -373,224 +32,45 @@ func Test_Stream_Reader(t *testing.T) {
 			testdata := make([]byte, len(test))
 			copy(testdata, test)
 
-			go func(rws Stream, testdata []byte) {
+			go func(c *testconn, testdata []byte) {
 				defer func() {
 					_ = recover()
 				}()
-
-				st, ok := rws.(*rwStream)
-				if !ok {
-					t.Errorf("expected rwStream, got %T", rws)
-				}
 
 				for _, b := range testdata {
 					select {
 					case <-ctx.Done():
 						return
-					case st.data <- b:
+					case c.rwc.data <- b:
 					}
 				}
 
-				close(st.data)
+				close(c.rwc.data)
 			}(rws, testdata)
 
-			buff := make([]byte, 10)
-			total := 0
-			n := 0
-			for {
-				n, err = rws.Read(buff)
-				if err != nil {
-					break
-				}
+			conctx, cancel := context.WithCancel(ctx)
+			s := &readStream{
+				rws.rwc,
+				conctx,           // context
+				cancel,           // cancel
+				sync.WaitGroup{}, // wg
+				sync.Mutex{},     // mutex
 
-				for i := 0; i < n; i++ {
-					if buff[i] != test[total+i] {
-						t.Fatalf("expected %v, got %v", test[total+i], buff[i])
-					}
-				}
-
-				total += n
+				// cleanup
+				func() {},
 			}
 
-			if err != io.EOF {
-				t.Fatalf("expected EOF, got %v", err)
-			}
-		})
-	}
-}
-
-func Test_Stream_Read_ctxcan(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	rws := NewStream(ctx, 0)
-
-	n, err := rws.Read([]byte("test"))
-	if n > 0 {
-		t.Fatalf("expected 0 bytes written, got %v", n)
-	}
-
-	if err != ctx.Err() {
-		t.Fatalf("expected error %v, got %v", ctx.Err(), err)
-	}
-}
-
-func Benchmark_Stream_Read(b *testing.B) {
-	data, err := randBytes(1)
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	bte := data[0]
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	rws := NewStream(ctx, 0)
-	defer func() {
-		err := rws.Close()
-		if err != nil {
-			b.Errorf("stream close error: %v", err)
-		}
-	}()
-
-	// Read the data being written to the stream
-	go func() {
-		// Data transfer channels
-		write := rws.In(ctx)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case write <- bte:
-			}
-		}
-	}()
-	read := rws.Out(ctx)
-
-	b.ResetTimer()
-
-	for n := 0; n < b.N; n++ {
-		select {
-		case <-ctx.Done():
-			return
-		case <-read:
-		}
-	}
-}
-
-func Test_Stream_Out(t *testing.T) {
-	data, err := setOfRandBytes(100)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for _, test := range data {
-		t.Logf("data length: %v bytes", len(test))
-
-		t.Run(fmt.Sprintf("%x", sha1.Sum(test)), func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-
-			rws := NewStream(ctx, 0)
 			defer func() {
-				err := rws.Close()
+				err = s.Close()
 				if err != nil {
 					t.Errorf("stream close error: %v", err)
 				}
 			}()
 
-			testdata := make([]byte, len(test))
-			copy(testdata, test)
-
-			go func(rws Stream, testdata []byte) {
-				// Ignoring this is fine because if it panic's due to an
-				// issue with a closed channel that is correct, if it doesn't
-				// the test will fail because there won't be enough bytes
-				// to satisfy the read.
-				defer func() {
-					_ = recover()
-				}()
-
-				write := rws.In(ctx)
-
-				for _, b := range testdata {
-					select {
-					case <-ctx.Done():
-						return
-					case write <- b:
-					}
-				}
-			}(rws, testdata)
-
-			// Data transfer channels
-			read := rws.Out(ctx)
-
-		readloop:
-			for i := 0; i < len(test); i++ {
-				select {
-				case <-ctx.Done():
-					t.Fatalf("context done | %s", ctx.Err())
-				case b, ok := <-read:
-					if !ok {
-						break readloop
-					}
-
-					if b != test[i] {
-						t.Fatalf("expected byte %v, got %v", test[i], b)
-					}
-				}
+			read, err := s.Recv(ctx, 0)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
 			}
-		})
-	}
-}
-
-func Test_Stream_Write(t *testing.T) {
-	data, err := setOfRandBytes(100)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for _, test := range data {
-		t.Logf("data length: %v bytes", len(test))
-
-		t.Run(fmt.Sprintf("%x", sha1.Sum(test)), func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-
-			rws := NewStream(ctx, 4)
-			defer func() {
-				err := rws.Close()
-				if err != nil {
-					t.Errorf("stream close error: %v", err)
-				}
-			}()
-
-			testdata := make([]byte, len(test))
-			copy(testdata, test)
-
-			go func(testdata []byte) {
-				// Ignoring this is fine because if it panic's due to an
-				// issue with a closed channel that is correct, if it doesn't
-				// the test will fail because there won't be enough bytes
-				// to satisfy the read.
-				defer func() {
-					_ = recover()
-				}()
-
-				total := 0
-				for total < len(testdata) {
-					n, err := rws.Write(testdata[total:])
-					if err != nil {
-						t.Errorf("write error: %v", err)
-						return
-					}
-
-					total += n
-				}
-			}(testdata)
-
-			// Data transfer channels
-			read := rws.Out(ctx)
 
 		readloop:
 			for i := 0; i < len(test); i++ {
@@ -611,205 +91,85 @@ func Test_Stream_Write(t *testing.T) {
 	}
 }
 
-func Test_Stream_Write_ctxcan(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	rws := NewStream(ctx, 0)
-
-	n, err := rws.Write([]byte("test"))
-	if n > 0 {
-		t.Fatalf("expected 0 bytes written, got %v", n)
-	}
-
-	if err != ctx.Err() {
-		t.Fatalf("expected error %v, got %v", ctx.Err(), err)
-	}
-}
-
-func Benchmark_Streams_Write(b *testing.B) {
-	data, err := randBytes(1)
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	bte := data[0]
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	rws := NewStream(ctx, 0)
-	defer func() {
-		err := rws.Close()
-		if err != nil {
-			b.Errorf("stream close error: %v", err)
-		}
-	}()
-
-	// Read the data being written to the stream
-	go func() {
-		// Data transfer channels
-		read := rws.Out(ctx)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-read:
-			}
-		}
-	}()
-
-	write := rws.In(ctx)
-
-	b.ResetTimer()
-
-	for n := 0; n < b.N; n++ {
-		select {
-		case <-ctx.Done():
-			return
-		case write <- bte:
-		}
-	}
-}
-
-func Test_Write(t *testing.T) {
+func Test_stream_Send(t *testing.T) {
 	data, err := setOfRandBytes(100)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	for sum, test := range data {
+	for _, test := range data {
 		t.Logf("data length: %v bytes", len(test))
 
-		t.Run(sum, func(t *testing.T) {
+		t.Run(fmt.Sprintf("%x", sha1.Sum(test)), func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			// Create a concurrent safe writer
-			stream := NewStream(ctx, 0)
+			rws := newStream(ctx)
+			defer func() {
+				err = rws.Close()
+				if err != nil {
+					t.Errorf("stream close error: %v", err)
+				}
+			}()
+
+			conctx, cancel := context.WithCancel(ctx)
+			s := &writeStream{
+				rws.rwc,
+				conctx,           // context
+				cancel,           // cancel
+				sync.WaitGroup{}, // wg
+				sync.Mutex{},     // mutex
+				// cleanup
+				func() {},
+			}
+
+			defer func() {
+				err = s.Close()
+				if err != nil {
+					t.Errorf("stream close error: %v", err)
+				}
+			}()
 
 			testdata := make([]byte, len(test))
 			copy(testdata, test)
 
-			go func(testdata []byte) {
-				// Ignoring this is fine because if it panic's due to an
-				// issue with a closed channel that is correct, if it doesn't
-				// the test will fail because there won't be enough bytes
-				// to satisfy the read.
+			go func(w Writer, testdata []byte) {
 				defer func() {
 					_ = recover()
 				}()
 
-				wchan := Write(ctx, stream, 0)
-				defer close(wchan)
+				data, err := w.Send(ctx, 0)
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
 
 				for _, b := range testdata {
 					select {
 					case <-ctx.Done():
-						t.Error("context done")
-					case wchan <- b:
+						return
+					case data <- b:
 					}
 				}
-			}(testdata)
+				close(data)
+			}(s, testdata)
 
-			out := stream.Out(ctx)
-		readloop:
-			for i := 0; i < len(test); i++ {
-				select {
-				case <-ctx.Done():
-					t.Fatal("context done")
-				case bte, ok := <-out:
-					if !ok {
-						break readloop
-					}
-
-					if bte != test[i] {
-						t.Fatalf("expected byte %v, got %v", test[i], bte)
-					}
-				}
+			read, err := rws.rwc.Recv(ctx, 0)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
 			}
-		})
-	}
-}
-
-type badWriter struct{}
-
-func (b *badWriter) Write(p []byte) (n int, err error) {
-	return 0, fmt.Errorf("bad writer error")
-}
-
-func Test_Write_Writer_Error(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	wchan := Write(ctx, &badWriter{}, 0)
-
-	timer := time.NewTimer(time.Millisecond * 50)
-
-	for i := 0; i < 2; i++ {
-		select {
-		case <-ctx.Done():
-			return
-		case wchan <- 0:
-		case <-timer.C:
-			return
-		}
-	}
-
-	t.Fatal("expected timer to return test")
-}
-
-func Test_Read(t *testing.T) {
-	data, err := setOfRandBytes(100)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for sum, test := range data {
-		t.Logf("data length: %v bytes", len(test))
-
-		t.Run(sum, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-
-			// Create a concurrent safe writer
-			stream := NewStream(ctx, 0)
-
-			testdata := make([]byte, len(test))
-			copy(testdata, test)
-
-			go func(testdata []byte) {
-				defer func() {
-					err := stream.Close()
-					if err != nil {
-						t.Logf("%T", err)
-						t.Error(err)
-					}
-				}()
-				in := stream.In(ctx)
-
-				for _, b := range testdata {
-					select {
-					case <-ctx.Done():
-						t.Error("context done")
-					case in <- b:
-					}
-				}
-			}(testdata)
-
-			out := Read(ctx, stream, 0)
 
 		readloop:
 			for i := 0; i < len(test); i++ {
 				select {
 				case <-ctx.Done():
-					t.Fatal("context done")
-				case bte, ok := <-out:
+					t.Fatalf("context done | %s", ctx.Err())
+				case b, ok := <-read:
 					if !ok {
 						break readloop
 					}
 
-					if bte != test[i] {
-						t.Fatalf("expected byte %v, got %v", test[i], bte)
+					if b != test[i] {
+						t.Fatalf("expected byte %v, got %v @ index %v", test[i], b, i)
 					}
 				}
 			}
