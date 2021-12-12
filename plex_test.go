@@ -4,244 +4,319 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha1"
-	"errors"
+	"encoding/gob"
 	"fmt"
 	"io"
+	"net"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
 )
 
-// This is a stupid test, only for coverage
-func Test_isPlex(t *testing.T) {
-	(&multiplexer{}).isPlex()
+// TODO: Test different reader/writer where the reader is one buffer
+// and the writer is a different buffer.
+// TODO: Do for encoders, as well as Recv/Send methods
+
+func Test_Multiplexer_Reader_canceled(t *testing.T) {
+	for name, test := range ctxCancelTests() {
+		t.Run(name, func(t *testing.T) {
+			m := &Multiplexer{ctx: test.parent}
+
+			timeout := time.Second
+			_, err := m.Reader(test.child, &timeout)
+
+			test.Eval(t, err)
+		})
+	}
 }
 
-func Test_Multiplexer_Reader(t *testing.T) {
-	data, err := setOfRandBytes(100)
-	if err != nil {
-		t.Fatal(err)
+func Test_Multiplexer_Add_canceled(t *testing.T) {
+	for name, test := range ctxCancelTests() {
+		t.Run(name, func(t *testing.T) {
+			m := &Multiplexer{
+				ctx:     test.parent,
+				readers: make(chan Conn, 1),
+				writers: make(chan Conn, 1),
+			}
+
+			_, err := m.Add(test.child, &iotestconn{
+				bytes.NewBuffer([]byte{}),
+				true,
+				"0.0.0.0",
+			})
+
+			test.Eval(t, err)
+		})
 	}
+}
 
-	for sum, test := range data {
-		t.Logf("data length: %v bytes", len(test))
+func netConnToConn(nc ...net.Conn) []Conn {
+	conns := make([]Conn, len(nc))
+	for i, c := range nc {
+		conns[i] = c
+	}
+	return conns
+}
 
-		t.Run(sum, func(t *testing.T) {
+func Test_Multiplexer_Add(t *testing.T) {
+	for name, test := range connectionTests() {
+		t.Run(name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
 			m, err := New(
 				ctx,
-				WithReaders(bytes.NewBuffer(test)),
+				WithMaxCapacity(100),
 			)
 			if err != nil {
-				t.Errorf("unexpected error: %v", err)
+				t.Fatal(err)
 			}
 
 			defer func() {
 				err = m.Close()
 				if err != nil {
-					t.Errorf("Publisher.Close() failed: %v", err)
+					t.Errorf("Close() failed: %v", err)
 				}
 			}()
 
-			rc, err := m.Reader(ctx, nil)
+			_, err = m.Add(ctx, netConnToConn(test.conns...)...)
 			if err != nil {
-				t.Errorf("unexpected error: %v", err)
+				if !test.err {
+					t.Fatal(err)
+				}
+				return
 			}
 
-			var output []byte
-			var n int
-			buff := make([]byte, 3)
-
-			for err == nil {
-				// Read from rc
-				n, err = rc.Read(buff)
-
-				// Append the read bytes to the output
-				output = append(output, buff[:n]...)
+			if len(m.readers) != test.expected {
+				t.Fatalf("expected %d readers, got %d", test.expected, len(m.readers))
 			}
 
-			if err != nil && err != io.EOF {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			rc.Close()
-
-			if len(output) != len(test) {
-				t.Fatalf("unexpected read length: %d", len(output))
-			}
-
-			diff := cmp.Diff(output, test)
-			if diff != "" {
-				t.Fatalf(
-					"byte mismatch\n %s", diff,
-				)
+			if len(m.writers) != test.expected {
+				t.Fatalf("expected %d writers, got %d", test.expected, len(m.writers))
 			}
 		})
 	}
 }
 
-func Test_Multiplexer_Multi_Reader(t *testing.T) {
+func Test_Multiplexer_Add_readers_left(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	dataset := map[string]bool{}
-	data, err := setOfRandBytes(100)
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	m, err := New(
 		ctx,
-		WithReadWriters(data.SliceOfReadWriter()...),
+		WithConnections(
+			&testconn{},
+		),
 	)
 	if err != nil {
-		t.Errorf("unexpected error: %v", err)
+		t.Fatal(err)
 	}
 
 	defer func() {
-		err := m.Close()
+		err = m.Close()
 		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+			t.Errorf("Close() failed: %v", err)
 		}
 	}()
 
-	for i := 0; i < len(data); i++ {
-		rc, err := m.Reader(ctx, nil)
-		if err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
-
-		var output []byte
-		var n int
-		buff := make([]byte, 3)
-
-		for err == nil {
-			// Read from rc
-			n, err = rc.Read(buff)
-
-			// Append the read bytes to the output
-			output = append(output, buff[:n]...)
-		}
-
-		if err != nil && err != io.EOF {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		rc.Close()
-
-		sum := fmt.Sprintf("%x", sha1.Sum(output))
-		_, exists := data[sum]
-		if !exists {
-			t.Fatalf("unexpected sum: %v", sum)
-		}
-
-		seen := dataset[sum]
-		if seen {
-			t.Fatalf("duplicate sum: %v", sum)
-		}
-
-		// Mark the sum as seen
-		dataset[sum] = true
-		t.Logf("found sum: %v", sum)
+	conns := []Conn{
+		&testconn{},
 	}
 
-	for k := range data {
-		seen, exists := dataset[k]
-		if !exists || !seen {
-			t.Fatalf("missing sum: %v", k)
-		}
-	}
-}
+	<-m.writers
 
-func Test_Multplexer_Writer(t *testing.T) {
-	data, err := setOfRandBytes(100)
+	before := len(m.writers)
+
+	left, err := m.Add(ctx, conns...)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	for sum, test := range data {
-		t.Run(sum, func(t *testing.T) {
-			t.Logf("data length: %v bytes", len(test))
+	if len(m.writers) != before+1 {
+		t.Fatalf("expected %d writers; got %d", before+1, len(m.writers))
+	}
 
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+	if len(conns) != len(left) {
+		t.Fatalf("expected %d left; got %d", len(conns), len(left))
+	}
 
-			stream := NewStream(ctx, 0)
-
-			m, err := New(
-				ctx,
-				WithWriters(stream),
-			)
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-
-			testdata := make([]byte, len(test))
-			copy(testdata, test)
-
-			go func(testdata []byte) {
-				wc, err := m.Writer(ctx, nil)
-				if err != nil {
-					t.Errorf("unexpected error: %v", err)
-				}
-				defer wc.Close()
-
-				var total int
-				var read int
-				for total < len(testdata) {
-					read, err = wc.Write(testdata[read:])
-					if err != nil {
-						t.Errorf("unexpected error: %v", err)
-						return
-					}
-
-					total += read
-				}
-			}(testdata)
-
-			data := stream.Out(ctx)
-
-		readloop:
-			for i := 0; ; i++ {
-				if i == len(test) {
-					m.Close()
-				}
-
-				select {
-				case <-ctx.Done():
-					t.Fatalf("unexpected error: %v", ctx.Err())
-				case bte, ok := <-data:
-					if !ok {
-						break readloop
-					}
-
-					if test[i] != bte {
-						t.Fatalf(
-							"byte mismatch at index %v; expected %v; got %v",
-							i,
-							test[i],
-							bte,
-						)
-					}
-				}
-			}
-		})
+	for i, conn := range conns {
+		if conn != left[i] {
+			t.Fatalf("expected %v; got %v", conn, left[i])
+		}
 	}
 }
 
-func Test_Plex_AllReaders_Busy_RequestReader(t *testing.T) {
+func Test_Multiplexer_Add_writers_left(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	m, err := New(
 		ctx,
-		WithReaders(
-			bytes.NewBuffer([]byte("test1")),
-			bytes.NewBuffer([]byte("test2")),
-			bytes.NewBuffer([]byte("test3")),
+		WithConnections(
+			&testconn{},
+		),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() {
+		err = m.Close()
+		if err != nil {
+			t.Errorf("Close() failed: %v", err)
+		}
+	}()
+
+	conns := []Conn{
+		&testconn{},
+	}
+
+	<-m.readers
+
+	before := len(m.readers)
+
+	left, err := m.Add(ctx, conns...)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(m.readers) != before+1 {
+		t.Fatalf("expected %d readers; got %d", before+1, len(m.readers))
+	}
+
+	if len(conns) != len(left) {
+		t.Fatalf("expected %d left; got %d", len(conns), len(left))
+	}
+
+	for i, conn := range conns {
+		if conn != left[i] {
+			t.Fatalf("expected %v; got %v", conn, left[i])
+		}
+	}
+}
+
+func Test_multiplexer_add_canceled(t *testing.T) {
+	for name, test := range ctxCancelTests() {
+		t.Run(name, func(t *testing.T) {
+			m := &Multiplexer{
+				ctx: test.parent,
+			}
+
+			for i := 0; i < 100; i++ {
+				conns := make(chan Conn, 1)
+
+				left := m.add(test.child, conns, &iotestconn{
+					bytes.NewBuffer([]byte{}),
+					true,
+					"0.0.0.0",
+				})
+
+				if len(left) != 0 {
+					return
+				}
+			}
+
+			t.Error("expected context canceled error")
+		})
+	}
+}
+
+func Test_add_toomanystreams(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	testdata := map[int]struct {
+		conns []Conn
+		left  int
+		err   error
+	}{
+		0: {
+			conns: make([]Conn, 1),
+			left:  1,
+			err:   nil,
+		},
+		1: {
+			conns: make([]Conn, 5),
+			left:  4,
+			err:   nil,
+		},
+		100: {
+			conns: make([]Conn, 100),
+			left:  0,
+			err:   nil,
+		},
+	}
+
+	m := &Multiplexer{
+		ctx: ctx,
+	}
+
+	for buffer, test := range testdata {
+		t.Run(fmt.Sprintf("buffer-%v-conns-%v", buffer, len(test.conns)), func(t *testing.T) {
+			conns := make(chan Conn, buffer)
+
+			left := m.add(ctx, conns, test.conns...)
+
+			if test.left != len(left) {
+				t.Errorf("Expected %v left; got %v", test.left, len(left))
+			}
+		})
+	}
+}
+
+func Test_Multiplexer_Writer_canceled(t *testing.T) {
+	for name, test := range ctxCancelTests() {
+		t.Run(name, func(t *testing.T) {
+			m := &Multiplexer{ctx: test.parent}
+
+			timeout := time.Second
+			_, err := m.Writer(test.child, &timeout)
+
+			test.Eval(t, err)
+		})
+	}
+}
+
+func Test_Multiplexer_Reader_timeout(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	m := &Multiplexer{ctx: ctx}
+
+	timeout := time.Millisecond
+	_, err := m.Reader(ctx, &timeout)
+	if err != errTimeout {
+		t.Errorf("Expected ErrTimeout; got %v", err)
+	}
+}
+
+func Test_Multiplexer_Writer_timeout(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	m := &Multiplexer{ctx: ctx}
+
+	timeout := time.Millisecond
+	_, err := m.Writer(ctx, &timeout)
+	if err != errTimeout {
+		t.Errorf("Expected ErrTimeout; got %v", err)
+	}
+}
+
+func Test_Multiplexer_Busy_RequestReader(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	m, err := New(
+		ctx,
+		WithConnections(
+			&iotestconn{rw: bytes.NewBuffer([]byte("test1"))},
+			&iotestconn{rw: bytes.NewBuffer([]byte("test2"))},
+			&iotestconn{rw: bytes.NewBuffer([]byte("test3"))},
 		),
 	)
 	if err != nil {
@@ -270,7 +345,7 @@ func Test_Plex_AllReaders_Busy_RequestReader(t *testing.T) {
 
 	// Test 4 (should timeout)
 	_, err = m.Reader(ctx, &timeout)
-	if err != ErrTimeout {
+	if err != errTimeout {
 		t.Errorf("unexpected error: %v", err)
 	}
 
@@ -331,18 +406,117 @@ func Test_Plex_AllReaders_Busy_RequestReader(t *testing.T) {
 	}
 }
 
+func Test_Multiplexer_Busy_RequestWriter(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	buffer := bytes.NewBuffer([]byte("testn"))
+
+	m, err := New(
+		ctx,
+		WithConnections(
+			&iotestconn{rw: buffer},
+			&iotestconn{rw: buffer},
+			&iotestconn{rw: buffer},
+		),
+	)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Test 1
+	test1, err := m.Writer(ctx, nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Test 2
+	test2, err := m.Writer(ctx, nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Test 3
+	test3, err := m.Writer(ctx, nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	timeout := time.Millisecond * 100
+
+	// Test 4 (should timeout)
+	_, err = m.Writer(ctx, &timeout)
+	if err != errTimeout {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Free up the reader
+	test1.Close()
+
+	// Test 5
+	test5, err := m.Writer(ctx, nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	n, err := test5.Write([]byte("test1"))
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	if n != 5 || !strings.HasSuffix(buffer.String(), "test1") {
+		t.Fatalf("unexpected data: %v", buffer.String())
+	}
+
+	// Free up the reader
+	test2.Close()
+
+	// Test 6
+	test6, err := m.Writer(ctx, nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	n, err = test6.Write([]byte("test2"))
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	if n != 5 || !strings.HasSuffix(buffer.String(), "test2") {
+		t.Fatalf("unexpected data: %v", buffer.String())
+	}
+
+	// Free up the reader
+	test3.Close()
+
+	// Test 7
+	test7, err := m.Writer(ctx, nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	n, err = test7.Write([]byte("test3"))
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	if n != 5 || !strings.HasSuffix(buffer.String(), "test3") {
+		t.Fatalf("unexpected data: %v", string(buffer.Bytes()[:n]))
+	}
+}
+
 func poolReadMethod(
 	ctx context.Context,
 	t *testing.T,
 	start <-chan struct{},
-	m Multiplexer,
+	m *Multiplexer,
 	sumchan chan<- string,
 ) {
 	<-start
 
 	reader, err := m.Reader(ctx, nil)
 	if err != nil {
-		t.Errorf("unexpected error: %v", err)
+		return
 	}
 
 	msg := make([]byte, 0)
@@ -361,6 +535,10 @@ func poolReadMethod(
 	}
 
 	if err != io.EOF {
+		if err != context.Canceled {
+			return
+		}
+
 		t.Errorf("unexpected error: %v", err)
 	}
 
@@ -372,14 +550,14 @@ func poolReadMethod(
 }
 
 // nolint:funlen
-func Test_Plex_AllReaders_Busy_RequestReader_Parallel(t *testing.T) {
+func Test_Multiplexer_AllReaders_Busy_RequestReader_Parallel(t *testing.T) {
 	testdata := []struct {
 		poolsize   int
 		readMethod func(
 			ctx context.Context,
 			t *testing.T,
 			start <-chan struct{},
-			m Multiplexer,
+			m *Multiplexer,
 			sumchan chan<- string,
 		)
 	}{
@@ -422,16 +600,16 @@ func Test_Plex_AllReaders_Busy_RequestReader_Parallel(t *testing.T) {
 			}
 
 			// Setup the data harness
-			readers := make([]io.Reader, len(sets))
+			conns := make([]net.Conn, 0, len(sets))
 			for sum, data := range sets {
 				sums[sum] = false
 
-				readers = append(readers, bytes.NewBuffer(data))
+				conns = append(conns, &iotestconn{rw: bytes.NewBuffer(data)})
 			}
 
 			m, err := New(
 				ctx,
-				WithReaders(readers...),
+				WithConnections(conns...),
 			)
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
@@ -479,452 +657,248 @@ func Test_Plex_AllReaders_Busy_RequestReader_Parallel(t *testing.T) {
 	}
 }
 
-// func Test_Out(t *testing.T) {
-// 	testdata := map[string]struct {
-// 		rwc      *rwc
-// 		expected []byte
-// 		err      bool
-// 	}{
-// 		"valid": {
-// 			&rwc{
-// 				buffer: make([]byte, 5),
-// 				wrote:  make(chan bool),
-// 			},
-// 			[]byte("test1"),
-// 			false,
-// 		},
-// 	}
-
-// 	for name, test := range testdata {
-// 		t.Run(name, func(t *testing.T) {
-// 			ctx, cancel := context.WithCancel(context.Background())
-// 			defer cancel()
-
-// 			plex := New(ctx, 0, WithReadWriters(test.rwc))
-// 			defer plex.Close()
-// 		})
-// 	}
-// }
-
-// func Test_In(t *testing.T) {
-// 	testdata := map[string]struct {
-// 		rwc *rwc
-// 		err bool
-// 	}{
-// 		"valid": {
-// 			&rwc{
-// 				buffer: []byte("test1"),
-// 			},
-// 			false,
-// 		},
-// 	}
-
-// 	for name, test := range testdata {
-// 		t.Run(name, func(t *testing.T) {
-// 			ctx, cancel := context.WithCancel(context.Background())
-// 			defer cancel()
-
-// 			multi := New(ctx, 0, WithReadWriters(test.rwc))
-
-// 			select {
-// 			case <-ctx.Done():
-// 				return
-// 			case data, ok := <-multi.In():
-// 				if !ok {
-// 					t.Fatalf("expected success")
-// 				}
-
-// 				if !reflect.DeepEqual(test.rwc.buffer, data) {
-// 					t.Fatalf("Expected [%s]; got [%s]", string(test.rwc.buffer), string(test.rwc.buffer))
-// 				}
-// 			}
-// 		})
-// 	}
-// }
-
-// func Test_In_Parallel(t *testing.T) {
-// 	testdata := []int{
-// 		1,
-// 		10,
-// 		100,
-// 		1000,
-// 		10000,
-// 	}
-
-// 	input := &rwc{
-// 		buffer: []byte("test1"),
-// 	}
-
-// 	for _, test := range testdata {
-// 		t.Run(fmt.Sprintf("%v", test), func(t *testing.T) {
-// 			ctx, cancel := context.WithCancel(context.Background())
-// 			defer cancel()
-
-// 			multi, err := New(
-// 				ctx,
-// 				input,
-// 				// input,
-// 				// input,
-// 				// input,
-// 				// input,
-// 			)
-// 			if err != nil {
-// 				t.Fatalf("expected success; %s", err)
-// 			}
-
-// 			data := make(chan []byte, test)
-// 			hold := make(chan bool)
-
-// 			var wg sync.WaitGroup
-// 			wg.Add(test)
-
-// 			for i := 0; i < test; i++ {
-// 				t.Logf("LOOP EXEC %v", i+1)
-// 				go func() {
-// 					defer wg.Done()
-// 					<-hold
-
-// 					// buff := make([]byte, 10)
-// 					// read, err := multi.Read(buff)
-// 					// if err != nil {
-// 					// 	t.Error(err)
-// 					// }
-
-// 					// t.Logf("READ %v bytes", read)
-
-// 					// data <- buff
-// 					select {
-// 					case <-ctx.Done():
-// 						return
-// 					case data <- <-multi.In():
-// 						fmt.Println("pushed")
-// 					}
-// 				}()
-// 			}
-
-// 			go func() {
-// 				wg.Wait()
-// 				fmt.Println("closing data")
-// 				close(data)
-// 				multi.Close()
-// 			}()
-
-// 			close(hold)
-// 			var count int
-// 		dloop:
-// 			for {
-// 				select {
-// 				case <-ctx.Done():
-// 					t.Fatal(ctx.Err())
-// 				case _, ok := <-data:
-// 					if !ok {
-// 						break dloop
-// 					}
-// 					count++
-// 				}
-// 			}
-
-// 			if count != test {
-// 				t.Fatalf("Expected %v; got %v", test, count)
-// 			}
-// 		})
-// 	}
-// }
-
-func Test_multiplexer_Add_canceled(t *testing.T) {
-	for name, test := range ctxCancelTests() {
-		t.Run(name, func(t *testing.T) {
-			m := &multiplexer{ctx: test.parent}
-			test.Eval(t, m.Add(test.child, &wStream{}))
-		})
-	}
+type MyType struct {
+	I int
+	B bool
+	F float32
+	S string
+	M MyType2
 }
 
-func Test_multiplexer_Reader_canceled(t *testing.T) {
-	for name, test := range ctxCancelTests() {
-		t.Run(name, func(t *testing.T) {
-			m := &multiplexer{ctx: test.parent}
-
-			timeout := time.Second
-			_, err := m.Reader(test.child, &timeout)
-
-			test.Eval(t, err)
-		})
-	}
+type MyType2 struct {
+	B bool
+	I int32
 }
 
-func Test_multiplexer_Writer_canceled(t *testing.T) {
-	for name, test := range ctxCancelTests() {
-		t.Run(name, func(t *testing.T) {
-			m := &multiplexer{ctx: test.parent}
+func Test_Encoders(t *testing.T) {
+	gob.Register(MyType{})
+	gob.Register(MyType2{})
 
-			timeout := time.Second
-			_, err := m.Writer(test.child, &timeout)
-
-			test.Eval(t, err)
-		})
-	}
-}
-
-func evalErr(err error) error {
-	if err == nil {
-		return errors.New("Expected error")
-	}
-
-	if err != context.Canceled {
-		return fmt.Errorf("Expected context.Canceled; got %v", err)
-	}
-
-	return nil
-}
-
-// NOTE: These still contain a possible race because the select could choose
-// the non-ctx Done option, but running it 100000 times like this didn't fail
-// the tests
-func Test_multiplexer_New_Writer_canceled(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	var err error
-	for i := 0; i < 100; i++ {
-		_, err = New(
-			ctx,
-			WithWriters(bytes.NewBuffer([]byte("test"))),
-		)
-
-		err = evalErr(err)
-		if err == nil {
-			return
-		}
-	}
-
-	if err != nil {
-		t.Error(err)
-	}
-}
-
-func Test_multiplexer_New_Reader_canceled(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	var err error
-	for i := 0; i < 100; i++ {
-		_, err = New(
-			ctx,
-			WithReaders(bytes.NewBuffer([]byte("test"))),
-		)
-
-		err = evalErr(err)
-		if err == nil {
-			return
-		}
-	}
-
-	if err != nil {
-		t.Error(err)
-	}
-}
-
-func Test_multiplexer_Reader_timeout(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	m := &multiplexer{ctx: ctx}
-
-	timeout := time.Millisecond
-	_, err := m.Reader(ctx, &timeout)
-	if err != ErrTimeout {
-		t.Errorf("Expected ErrTimeout; got %v", err)
-	}
-}
-
-func Test_multiplexer_Reader_closed_readers(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	readers := make(chan ReadStream)
-
-	m := &multiplexer{
-		ctx:     ctx,
-		readers: readers,
-	}
-
-	close(readers)
-
-	_, err := m.Reader(ctx, nil)
-	if err != ErrClosed {
-		t.Errorf("Expected ErrClosed; got %v", err)
-	}
-}
-
-func Test_multiplexer_Reader_cleanup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	m, err := New(
 		ctx,
-		WithReaders(bytes.NewBuffer([]byte("test"))),
+		WithConnections(&iotestconn{rw: bytes.NewBuffer([]byte{})}),
 	)
 	if err != nil {
-		t.Fatal(err)
+		t.Errorf("unexpected error: %v", err)
 	}
 
-	r, err := m.Reader(ctx, nil)
+	writer, err := m.Writer(ctx, nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	reader, err := m.Reader(ctx, nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	enc := gob.NewEncoder(writer)
+	dec := gob.NewDecoder(reader)
+
+	data := MyType{
+		I: 1,
+		B: true,
+		F: 1.0,
+		S: "test",
+		M: MyType2{
+			B: true,
+			I: 1,
+		},
+	}
+
+	count := 1000
+	for i := 0; i < count; i++ {
+		t.Logf("encoding %v", data)
+
+		err := enc.Encode(data)
+		if err != nil && err != io.EOF {
+			t.Fatal(err)
+		}
+
+		v := MyType{}
+
+		t.Logf("decoding type %T", v)
+		err = dec.Decode(&v)
+		if err != nil && err != io.EOF {
+			t.Fatal(err)
+		}
+
+		if !reflect.DeepEqual(data, v) {
+			t.Fatalf("unexpected data: %v", v)
+		}
+
+		t.Logf("data match")
+	}
+}
+
+func Test_Multiplexer_Reader(t *testing.T) {
+	data, err := setOfRandBytes(100)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	multiplex, ok := m.(*multiplexer)
-	if !ok {
-		t.Fatal("Expected multiplexer")
-	}
+	for sum, test := range data {
+		t.Logf("data length: %v bytes", len(test))
 
-	if len(multiplex.readers) != 0 {
-		t.Errorf("Expected 0 readers; got %v", len(multiplex.readers))
-	}
+		t.Run(sum, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
 
-	r.Close()
+			m, err := New(
+				ctx,
+				WithConnections(&iotestconn{rw: bytes.NewBuffer(test)}),
+			)
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
 
-	if len(multiplex.readers) != 1 {
-		t.Errorf("Expected 1 readers; got %v", len(multiplex.readers))
+			defer func() {
+				err = m.Close()
+				if err != nil {
+					t.Errorf("Publisher.Close() failed: %v", err)
+				}
+			}()
+
+			rc, err := m.Reader(ctx, nil)
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+
+			var output []byte
+			var n int
+			buff := make([]byte, 3)
+
+			for err == nil {
+				// Read from rc
+				n, err = rc.Read(buff)
+
+				// Append the read bytes to the output
+				output = append(output, buff[:n]...)
+			}
+
+			if err != nil && err != io.EOF {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			rc.Close()
+
+			if len(output) != len(test) {
+				t.Fatalf("unexpected read length: %d", len(output))
+			}
+
+			diff := cmp.Diff(output, test)
+			if diff != "" {
+				t.Fatalf(
+					"byte mismatch\n %s", diff,
+				)
+			}
+		})
 	}
 }
 
-func Test_multiplexer_Reader_cleanup_ctxcan(t *testing.T) {
-	for i := 0; i < 100; i++ {
-		ctx, cancel := context.WithCancel(context.Background())
-
-		m, err := New(
-			ctx,
-			WithReaders(bytes.NewBuffer([]byte("test"))),
-		)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		r, err := m.Reader(ctx, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		cancel()
-		err = r.Close()
-		if err == context.Canceled {
-			return
-		}
-	}
-
-	t.Fatal("Expected context.Canceled")
+type killstr struct {
+	io.ReadWriter
+	close func() error
 }
 
-func Test_multiplexer_Writer_timeout(t *testing.T) {
+func (*killstr) RemoteAddr() net.Addr {
+	return &net.TCPAddr{
+		IP:   net.IP{0, 0, 0, 0},
+		Port: 0,
+	}
+}
+
+func (k *killstr) Close() error {
+	return k.close()
+}
+
+func Test_kill(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	m := &multiplexer{ctx: ctx}
+	conns := make(chan Conn, 2)
+	done := make(chan struct{})
 
-	timeout := time.Millisecond
-	_, err := m.Writer(ctx, &timeout)
-	if err != ErrTimeout {
-		t.Errorf("Expected ErrTimeout; got %v", err)
-	}
-}
-
-func Test_multiplexer_Writer_closed_writers(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	m := &multiplexer{
-		ctx:     ctx,
-		writers: make(chan WriteStream),
+	conns <- nil
+	conns <- &killstr{
+		bytes.NewBuffer([]byte{}),
+		func() error {
+			close(done)
+			return nil
+		},
 	}
 
-	close(m.writers)
-
-	_, err := m.Writer(ctx, nil)
-	if err != ErrClosed {
-		t.Errorf("Expected ErrClosed; got %v", err)
-	}
-}
-
-func Test_multiplexer_Writer_cleanup(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	m, err := New(
-		ctx,
-		WithWriters(bytes.NewBuffer([]byte("test"))),
-	)
+	m, err := New(ctx)
 	if err != nil {
-		t.Fatal(err)
+		t.Errorf("unexpected error: %v", err)
 	}
 
-	w, err := m.Writer(ctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	go m.kill(conns)
 
-	multiplex, ok := m.(*multiplexer)
-	if !ok {
-		t.Fatal("Expected multiplexer")
-	}
-
-	if len(multiplex.writers) != 0 {
-		t.Errorf("Expected 0 writers; got %v", len(multiplex.writers))
-	}
-
-	w.Close()
-
-	if len(multiplex.writers) != 1 {
-		t.Errorf("Expected 1 writers; got %v", len(multiplex.writers))
+	timer := time.NewTimer(time.Second)
+	select {
+	case <-done:
+	case <-timer.C:
+		t.Fatal("timeout")
 	}
 }
 
-func Test_multiplexer_Writer_cleanup_ctxcan(t *testing.T) {
-	for i := 0; i < 100; i++ {
-		ctx, cancel := context.WithCancel(context.Background())
-
-		m, err := New(
-			ctx,
-			WithWriters(bytes.NewBuffer([]byte("test"))),
-		)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		w, err := m.Writer(ctx, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		cancel()
-		err = w.Close()
-		if err == context.Canceled {
-			return
-		}
-	}
-
-	t.Fatal("Expected context.Canceled")
-}
-
-func Test_multiplexer_New_ReaderWriter_canceled(t *testing.T) {
+func Test_kill_closed_chan(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	conns := make(chan Conn)
+
+	m, err := New(ctx)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	close(conns)
+	m.kill(conns)
+}
+
+func Test_kill_ctxcan(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	conns := make(chan Conn)
+
+	m, err := New(ctx)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
 	cancel()
+	m.kill(conns)
+}
 
-	var err error
-	for i := 0; i < 100; i++ {
-		_, err = New(
-			ctx,
-			WithReadWriters(bytes.NewBuffer([]byte("test"))),
-		)
+func Test_kill_panic(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-		err = evalErr(err)
-		if err == nil {
-			return
-		}
+	conns := make(chan Conn, 1)
+
+	conns <- &killstr{
+		bytes.NewBuffer([]byte{}),
+		func() error {
+			panic("test panic")
+		},
 	}
 
+	m, err := New(ctx)
 	if err != nil {
-		t.Error(err)
+		t.Errorf("unexpected error: %v", err)
 	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatal("unexpected panic")
+		}
+	}()
+
+	m.kill(conns)
 }

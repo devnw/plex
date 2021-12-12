@@ -1,86 +1,105 @@
 package plex
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"io"
+	"fmt"
+	"net"
 	"testing"
+	"time"
 )
 
-func Test_WithReadWriters(t *testing.T) {
-	testdata := map[string]struct {
-		rws      []io.ReadWriter
-		err      bool
-		expected int
-	}{
+type conntest struct {
+	conns    []net.Conn
+	err      bool
+	expected int
+}
+
+func connectionTests() map[string]conntest {
+	return map[string]conntest{
 		"single": {
-			[]io.ReadWriter{bytes.NewBuffer([]byte{})},
+			[]net.Conn{
+				&testconn{},
+			},
 			false,
 			1,
 		},
 		"single nil": {
-			[]io.ReadWriter{},
-			true,
+			[]net.Conn{
+				nil,
+			},
+			false,
 			0,
 		},
 		"single valid, single nil (first)": {
-			[]io.ReadWriter{
+			[]net.Conn{
 				nil,
-				bytes.NewBuffer([]byte{}),
+				&testconn{},
 			},
 			false,
 			1,
 		},
 		"single valid, single nil (last)": {
-			[]io.ReadWriter{
-				bytes.NewBuffer([]byte{}),
+			[]net.Conn{
+				&testconn{},
 				nil,
 			},
 			false,
 			1,
 		},
 		"multi": {
-			[]io.ReadWriter{
-				bytes.NewBuffer([]byte{}),
-				bytes.NewBuffer([]byte{}),
-				bytes.NewBuffer([]byte{}),
-				bytes.NewBuffer([]byte{}),
-				bytes.NewBuffer([]byte{}),
+			[]net.Conn{
+				&testconn{},
+				&testconn{},
+				&testconn{},
+				&testconn{},
+				&testconn{},
 			},
 			false,
 			5,
 		},
 		"multi nil": {
-			[]io.ReadWriter{
-				bytes.NewBuffer([]byte{}),
+			[]net.Conn{
+				&testconn{},
 				nil,
-				bytes.NewBuffer([]byte{}),
+				&testconn{},
 				nil,
-				bytes.NewBuffer([]byte{}),
+				&testconn{},
 			},
 			false,
 			3,
 		},
 		"multi valid, single nil": {
-			[]io.ReadWriter{
-				bytes.NewBuffer([]byte{}),
-				bytes.NewBuffer([]byte{}),
+			[]net.Conn{
+				&testconn{},
+				&testconn{},
 				nil,
-				bytes.NewBuffer([]byte{}),
-				bytes.NewBuffer([]byte{}),
+				&testconn{},
+				&testconn{},
 			},
 			false,
 			4,
 		},
+		"multi different remote": {
+			[]net.Conn{
+				&testconn{
+					addr: "127.0.0.1",
+				},
+				&testconn{},
+			},
+			true,
+			0,
+		},
 	}
+}
 
-	for name, test := range testdata {
+func Test_WithConnections(t *testing.T) {
+	for name, test := range connectionTests() {
 		t.Run(name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			m, err := New(ctx, WithReadWriters(test.rws...))
+			m, err := New(ctx, WithConnections(test.conns...))
 			if err != nil {
 				if !test.err {
 					t.Fatal(err)
@@ -91,330 +110,62 @@ func Test_WithReadWriters(t *testing.T) {
 			defer func() {
 				err := m.Close()
 				if err != nil {
-					t.Errorf("Publisher.Close() failed: %v", err)
+					t.Errorf("Close() failed: %v", err)
 				}
 			}()
 
-			plex, ok := m.(*multiplexer)
-			if !ok {
-				t.Fatal("expected multiplexer")
+			if len(m.readers) != test.expected {
+				t.Fatalf("expected %d readers, got %d", test.expected, len(m.readers))
 			}
 
-			if len(plex.readers) != test.expected {
-				t.Fatalf("expected %d readers, got %d", test.expected, len(plex.readers))
-			}
-
-			if len(plex.writers) != test.expected {
-				t.Fatalf("expected %d writers, got %d", test.expected, len(plex.writers))
+			if len(m.writers) != test.expected {
+				t.Fatalf("expected %d writers, got %d", test.expected, len(m.writers))
 			}
 		})
 	}
 }
 
-func Test_WithWriters(t *testing.T) {
-	testdata := map[string]struct {
-		ws       []io.Writer
-		err      bool
-		expected int
-	}{
-		"single": {
-			[]io.Writer{bytes.NewBuffer([]byte{})},
-			false,
-			1,
-		},
-		"single nil": {
-			[]io.Writer{},
-			true,
-			0,
-		},
-		"single valid, single nil (first)": {
-			[]io.Writer{
-				nil,
-				bytes.NewBuffer([]byte{}),
-			},
-			false,
-			1,
-		},
-		"single valid, single nil (last)": {
-			[]io.Writer{
-				bytes.NewBuffer([]byte{}),
-				nil,
-			},
-			false,
-			1,
-		},
-		"multi": {
-			[]io.Writer{
-				bytes.NewBuffer([]byte{}),
-				bytes.NewBuffer([]byte{}),
-				bytes.NewBuffer([]byte{}),
-				bytes.NewBuffer([]byte{}),
-				bytes.NewBuffer([]byte{}),
-			},
-			false,
-			5,
-		},
-		"multi nil": {
-			[]io.Writer{
-				bytes.NewBuffer([]byte{}),
-				nil,
-				bytes.NewBuffer([]byte{}),
-				nil,
-				bytes.NewBuffer([]byte{}),
-			},
-			false,
-			3,
-		},
-		"multi valid, single nil": {
-			[]io.Writer{
-				bytes.NewBuffer([]byte{}),
-				bytes.NewBuffer([]byte{}),
-				nil,
-				bytes.NewBuffer([]byte{}),
-				bytes.NewBuffer([]byte{}),
-			},
-			false,
-			4,
-		},
+func Test_WithConnector(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	fn := func(ctx context.Context, addr net.Addr) (net.Conn, error) {
+		return &testconn{
+			addr: "0.0.0.0",
+			tcp:  true,
+		}, nil
 	}
 
-	for name, test := range testdata {
-		t.Run(name, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+	m, err := New(
+		ctx,
+		WithConnector(fn),
+	)
 
-			m, err := New(ctx, WithWriters(test.ws...))
-			if err != nil {
-				if !test.err {
-					t.Fatal(err)
-				}
-				return
-			}
+	if err != nil {
+		t.Fatal(err)
+	}
 
-			defer func() {
-				err := m.Close()
-				if err != nil {
-					t.Errorf("Publisher.Close() failed: %v", err)
-				}
-			}()
-
-			plex, ok := m.(*multiplexer)
-			if !ok {
-				t.Fatal("expected multiplexer")
-			}
-
-			if len(plex.writers) != test.expected {
-				t.Fatalf("expected %d writers, got %d", test.expected, len(plex.writers))
-			}
-		})
+	if m.connector == nil {
+		t.Fatal("expected connector to be set")
 	}
 }
 
-func Test_WithReaders(t *testing.T) {
-	testdata := map[string]struct {
-		rs       []io.Reader
-		err      bool
-		expected int
-	}{
-		"single": {
-			[]io.Reader{bytes.NewBuffer([]byte{})},
-			false,
-			1,
-		},
-		"single nil": {
-			[]io.Reader{},
-			true,
-			0,
-		},
-		"single valid, single nil (first)": {
-			[]io.Reader{
-				nil,
-				bytes.NewBuffer([]byte{}),
-			},
-			false,
-			1,
-		},
-		"single valid, single nil (last)": {
-			[]io.Reader{
-				bytes.NewBuffer([]byte{}),
-				nil,
-			},
-			false,
-			1,
-		},
-		"multi": {
-			[]io.Reader{
-				bytes.NewBuffer([]byte{}),
-				bytes.NewBuffer([]byte{}),
-				bytes.NewBuffer([]byte{}),
-				bytes.NewBuffer([]byte{}),
-				bytes.NewBuffer([]byte{}),
-			},
-			false,
-			5,
-		},
-		"multi nil": {
-			[]io.Reader{
-				bytes.NewBuffer([]byte{}),
-				nil,
-				bytes.NewBuffer([]byte{}),
-				nil,
-				bytes.NewBuffer([]byte{}),
-			},
-			false,
-			3,
-		},
-		"multi valid, single nil": {
-			[]io.Reader{
-				bytes.NewBuffer([]byte{}),
-				bytes.NewBuffer([]byte{}),
-				nil,
-				bytes.NewBuffer([]byte{}),
-				bytes.NewBuffer([]byte{}),
-			},
-			false,
-			4,
-		},
-	}
+func Test_WithConnector_nil(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	for name, test := range testdata {
-		t.Run(name, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+	_, err := New(
+		ctx,
+		WithConnector(nil),
+	)
 
-			m, err := New(ctx, WithReaders(test.rs...))
-			if err != nil {
-				if !test.err {
-					t.Fatal(err)
-				}
-				return
-			}
-
-			defer func() {
-				err := m.Close()
-				if err != nil {
-					t.Errorf("Publisher.Close() failed: %v", err)
-				}
-			}()
-
-			plex, ok := m.(*multiplexer)
-			if !ok {
-				t.Fatal("expected multiplexer")
-			}
-
-			if len(plex.readers) != test.expected {
-				t.Fatalf("expected %d readers, got %d", test.expected, len(plex.readers))
-			}
-		})
-	}
-}
-
-func Test_WithWriteBuffer(t *testing.T) {
-	testdata := map[string]struct {
-		buffer   int
-		expected int
-	}{
-		"valid": {
-			10,
-			10,
-		},
-		"< 0": {
-			-1,
-			0,
-		},
-	}
-
-	for name, test := range testdata {
-		t.Run(name, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-
-			m, err := New(
-				ctx,
-				WithWriteBuffer(test.buffer),
-				WithReadWriters(bytes.NewBuffer([]byte{})),
-			)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			defer func() {
-				err := m.Close()
-				if err != nil {
-					t.Errorf("Publisher.Close() failed: %v", err)
-				}
-			}()
-
-			plex, ok := m.(*multiplexer)
-			if !ok {
-				t.Fatal("expected multiplexer")
-			}
-
-			if plex.writeBufferSize != test.expected {
-				t.Fatalf(
-					"expected %d write buffer, got %d",
-					test.expected,
-					plex.writeBufferSize,
-				)
-			}
-		})
-	}
-}
-
-func Test_WithReadBuffer(t *testing.T) {
-	testdata := map[string]struct {
-		buffer   int
-		expected int
-	}{
-		"valid": {
-			10,
-			10,
-		},
-		"< 0": {
-			-1,
-			0,
-		},
-	}
-
-	for name, test := range testdata {
-		t.Run(name, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-
-			m, err := New(
-				ctx,
-				WithReadBuffer(test.buffer),
-				WithReadWriters(bytes.NewBuffer([]byte{})),
-			)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			defer func() {
-				err := m.Close()
-				if err != nil {
-					t.Errorf("Publisher.Close() failed: %v", err)
-				}
-			}()
-
-			plex, ok := m.(*multiplexer)
-			if !ok {
-				t.Fatal("expected multiplexer")
-			}
-
-			if plex.readBufferSize != test.expected {
-				t.Fatalf(
-					"expected %d write buffer, got %d",
-					test.expected,
-					plex.readBufferSize,
-				)
-			}
-		})
+	if err != errConnectorNil {
+		t.Fatalf("expected ErrConnectorNil; got %v", err)
 	}
 }
 
 func WithErrOption() Option {
-	return func(m *multiplexer) error {
+	return func(m *Multiplexer) error {
 		return errors.New("err")
 	}
 }
@@ -426,10 +177,137 @@ func Test_OptionError(t *testing.T) {
 	_, err := New(
 		ctx,
 		WithErrOption(),
-		WithReadWriters(bytes.NewBuffer([]byte{})),
 	)
 
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func Test_WithMaxCapacity(t *testing.T) {
+	testdata := map[int]error{
+		1:  nil,
+		5:  nil,
+		10: nil,
+		15: nil,
+		-1: errInvalidMaxCapacity,
+	}
+
+	for capacity, expErr := range testdata {
+		t.Run(fmt.Sprintf("cap-%v", capacity), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			m, err := New(
+				ctx,
+				WithMaxCapacity(capacity),
+			)
+
+			if err != expErr {
+				t.Fatalf("expected %v; got %v", expErr, err)
+			}
+
+			if err != nil {
+				return
+			}
+
+			if m.capacity != capacity {
+				t.Fatalf("expected capacity %v; got %v", capacity, m.capacity)
+			}
+
+			if cap(m.readers) != capacity {
+				t.Fatalf(
+					"expected reader capacity %v; got %v",
+					capacity,
+					cap(m.readers),
+				)
+			}
+
+			if cap(m.writers) != capacity {
+				t.Fatalf(
+					"expected writer capacity %v; got %v",
+					capacity,
+					cap(m.writers),
+				)
+			}
+		})
+	}
+}
+
+func Test_WithMaxCapacity_MoreConnections(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, err := New(
+		ctx,
+		WithMaxCapacity(1),
+		WithConnections(
+			&testconn{},
+			&testconn{},
+		),
+	)
+
+	if err != errTooManyConns {
+		t.Fatalf("expected %v; got %v", errTooManyConns, err)
+	}
+}
+
+func Test_WithAutoScale_NoConnect(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, err := New(
+		ctx,
+		WithAutoScaling(time.Millisecond),
+	)
+
+	if err != errImproperAutoScalingNilConnector {
+		t.Fatalf(
+			"expected %v; got %v",
+			errImproperAutoScalingNilConnector,
+			err,
+		)
+	}
+}
+
+func Test_WithAutoScaling(t *testing.T) {
+	testdata := map[time.Duration]error{
+		time.Nanosecond:   nil,
+		time.Millisecond:  nil,
+		time.Second:       nil,
+		time.Minute:       nil,
+		time.Duration(-1): errInvalidTimeout,
+	}
+
+	for duration, expErr := range testdata {
+		t.Run(fmt.Sprintf("scale_timeout-%s", duration), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			m, err := New(
+				ctx,
+				WithAutoScaling(duration),
+				WithConnector(
+					func(context.Context, net.Addr) (net.Conn, error) {
+						return &testconn{}, nil
+					}),
+			)
+
+			if err != expErr {
+				t.Fatalf("expected %v; got %v", expErr, err)
+			}
+
+			if err != nil {
+				return
+			}
+
+			if m.scaleTimeout == nil {
+				t.Fatal("expected scaleTimeout to be set")
+			}
+
+			if *m.scaleTimeout != duration {
+				t.Fatalf("expected capacity %v; got %v", duration, *m.scaleTimeout)
+			}
+		})
 	}
 }
